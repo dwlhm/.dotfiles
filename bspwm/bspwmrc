@@ -1,0 +1,34 @@
+#! /bin/sh
+
+# run the xrandr command below if an connected monitor detected
+external_monitor=$(xrandr -q | grep "HDMI-1 connected")
+if [[ $external_monitor ]]; then
+    xrandr --output eDP-1 --primary --mode 1366x768 --rotate normal 
+    xrandr --output HDMI-1 --mode 1920x1080 --rotate normal --left-of eDP-1
+    bspc monitor HDMI-1 -d 1 2 3 4 5
+    bspc monitor eDP-1 -d 6 7 8 9 0
+else    
+    xrandr --output eDP-1 --primary --mode 1920x1080 rotate normal
+    bspc monitor -d 1 2 3 4 5 6 7 8 9 0
+fi
+
+# kill all programs
+pkill lemonbar.sh
+
+# run all programs
+~/.config/lemonbar/lemonbar.sh & # run lemonbar 
+pamixer -u # unmute speaker
+scort # run screenshoot programs
+pgrep -x sxhkd > /dev/null || sxhkd & # run sxhkd
+~/.fehbg & # run background changer
+picom --config ~/.config/picom/picom.conf & # run composite
+
+# windows settings
+bspc config border_width        2  
+bspc config window_gap          5 
+bspc config focused_border_color "#025db7"
+bspc config normal_border_color "#222D32"
+
+bspc config split_ratio          0.52
+bspc config borderless_monocle   true
+bspc config gapless_monocle      true
