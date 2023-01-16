@@ -7,4 +7,5 @@ Penggunaan nix pacakage manager dalam konfigurasi ini dikususkan untuk aplikasi 
 OS: Arch Linux x86_64\
 WM: bspwm\
 Shell: zsh 5.9\
-Terminal: urxvt
+Terminal: urxvt\
+Bar: lemobar
