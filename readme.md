@@ -4,7 +4,7 @@ Dalam konfigurasi ini digunakan juga nix package manager untuk memudahkan setup 
 Penggunaan nix pacakage manager dalam konfigurasi ini dikususkan untuk aplikasi berbasis CLI.
 
 ### Detail
-OS: Arch Linux x86_64
-WM: bspwm
-Shell: zsh 5.9
-Terminal: urxvt
+OS: Arch Linux x86_64\n
+WM: bspwm\n
+Shell: zsh 5.9\n
+Terminal: urxvt\n
