@@ -1,0 +1,10 @@
+# Machine-specific AGY config — do NOT commit
+antigravity/config.json
+
+# AGY runtime-managed directories
+antigravity/plugins/
+antigravity/projects/
+antigravity/sidecars/
+
+# AGY internal marker
+antigravity/.migrated

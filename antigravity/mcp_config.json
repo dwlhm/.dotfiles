@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "paus": {
+      "command": "node",
+      "args": [
+        "/Users/dwlhm/project/paus/src/mcp-server.mjs"
+      ]
+    }
+  }
+}
