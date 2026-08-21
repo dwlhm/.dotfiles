@@ -1,11 +1,11 @@
-# dotfiles
+# homedir
 
-Personal configuration files for AI agents and developer tools.
+Personal home directory and system configurations.
 
 ## Structure
 
 ```
-~/.dotfiles/
+~/homedir/
 └── antigravity/        # Google Antigravity (AGY) global config
     ├── rules/          # Agent behavior rules (always loaded)
     ├── hooks/          # Lifecycle hook scripts
@@ -19,7 +19,7 @@ Personal configuration files for AI agents and developer tools.
 ### 1. Clone the repo
 
 ```bash
-git clone <your-repo-url> ~/.dotfiles
+git clone <your-repo-url> ~/homedir
 ```
 
 ### 2. Symlink AGY config
@@ -29,7 +29,7 @@ git clone <your-repo-url> ~/.dotfiles
 mv ~/.gemini/config ~/.gemini/config.bak
 
 # Create symlink
-ln -s ~/.dotfiles/antigravity ~/.gemini/config
+ln -s ~/homedir/antigravity ~/.gemini/config
 ```
 
 ### 3. Restore machine-specific files
@@ -37,7 +37,7 @@ ln -s ~/.dotfiles/antigravity ~/.gemini/config
 `config.json` is not tracked (machine-specific). Restore from backup or create fresh:
 
 ```bash
-cp ~/.gemini/config.bak/config.json ~/.dotfiles/antigravity/config.json
+cp ~/.gemini/config.bak/config.json ~/homedir/antigravity/config.json
 ```
 
 AGY will recreate `plugins/` and `projects/` automatically on first run.
