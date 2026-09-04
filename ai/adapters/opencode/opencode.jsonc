@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Loaded directly from core — no sync/copy buffer needed
+  "instructions": [
+    "/Users/dwlhm/.dotfiles/ai/core/*.md"
+  ],
+  // Canonical skills (second-brain, subagent-management, ui-contrast)
+  // + adapter-local skills (plugin-manager, observability)
+  "skills": {
+    "paths": [
+      "/Users/dwlhm/.dotfiles/ai/skills",
+      "/Users/dwlhm/.dotfiles/ai/adapters/opencode/skills"
+    ]
+  },
+  // Shared knowledge base and adapter files live outside most project roots
+  "permission": {
+    "external_directory": {
+      "*": "ask",
+      "/Users/dwlhm/.dotfiles/**": "allow"
+    }
+  }
+}
