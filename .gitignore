@@ -1,14 +1,2 @@
-# Machine-specific AGY config — do NOT commit
-ai/adapters/antigravity/config.json
-
-# AGY runtime-managed directories
-ai/adapters/antigravity/plugins/
-ai/adapters/antigravity/projects/
-ai/adapters/antigravity/sidecars/
-
-# AGY internal marker
-ai/adapters/antigravity/.migrated
-
 # OS metadata
 .DS_Store
-
