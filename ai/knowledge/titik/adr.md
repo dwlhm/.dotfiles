@@ -20,9 +20,12 @@
 - **Decision**: Plugins define their own `short_bang` metadata in their manifest triggers. Plugins activate via query text ONLY with a leading `!` followed by either the plugin name or its short-bang and a trailing space (`!name ` or `!short_bang `). Interactive list selection and Tab autocomplete automatically append a trailing space to immediately activate the plugin.
 - **Rationale**: Prevents accidental query hijacking during generic text searches, unifies all command triggers under the standard bang namespace, and allows plugins to cleanly expose custom short-bang identifiers.
 
-## ADR 6: Liquid Glass HUD Translucency & Adaptive Fallback Engine
-- **Decision**: Calibrate Liquid Glass with `NSVisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)`, ~0.48 opacity dark tint, specular gradient rim lighting (`borderGlassGradient`), and inner top sheen (`innerSheenGradient`), backed by an automatic fallback to solid dark acrylic (`bgSolidFallback`) when tint opacity \(\ge 0.80\) or macOS *Reduce Transparency* is active.
-- **Rationale**: Eliminates opaque muddy visuals caused by legacy `.hudWindow` and over-saturated tints while preserving text contrast and preventing wasted GPU rendering under non-transparent or accessibility conditions.
+## ADR 6: Native Apple Liquid Glass (2026-10-03)
+- **Context**: The user explicitly required real Apple Liquid Glass APIs and rejected blur/shadow emulation. The previous NSVisualEffectView, tint, gradient rim, and sheen composition was an imitation and is superseded.
+- **Decision**: Use SwiftUI `glassEffect` for launcher and switcher surfaces on macOS 26+. Use an explicitly opaque fallback on older macOS versions or when Reduce Transparency is active. Reserve native effect clearance in window/content geometry; do not add manual shadows or simulated blur/gradient/tint stacks.
+- **Rationale**: Apple owns Liquid Glass material rendering through the native API. Handcrafted vibrancy and decoration cannot satisfy the user's native API requirement.
+- **Consequences**: Older systems retain a usable opaque surface without claiming Liquid Glass. Material appearance follows the system; geometry must leave room for its native rendering.
+- **Source**: User correction on 2026-10-03; [Applying Liquid Glass to custom views](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views); [Apple HIG Materials](https://developer.apple.com/design/human-interface-guidelines/materials).
 
 ## ADR 7: Explicit Whitelist Plugin Management via config.json
 - **Decision**: Plugin lifecycle is strictly configuration-driven (`PluginsConfig` in `config.json`). Only plugin reverse-DNS IDs explicitly mapped to `true` in `config.plugins` are loaded at startup or reindex. Bundles on disk without configuration are inert. The plugin system is managed through a first-party `PluginSystemPlugin` (`!plugin reload`).
@@ -44,5 +47,9 @@
 ## ADR 11: Formalized Trigger System, Delimiter-Bounded Parsing & PluginInvocation AST
 - **Decision**: Centralize all input parsing, trigger resolution, and flag extraction inside `TitikParser` (`CommandParser`) and formalize `PluginInvocation` in `TitikPluginKit`. Plugins must register clean triggers without `!` (e.g. `["note", "n"]`, `["calc"]`, `["emoji", "e"]`), and `!` is strictly the platform command prefix delimiter in the HUD. Plugins must strictly listen to `PluginInvocation` (both `TitikCommandPlugin.executeCommand(invocation:context:)` and `TitikStreamingPlugin.onQuery(invocation:)`) and are forbidden from implementing bespoke string-splitters, ad-hoc tokenizers, or bang-stripping (analogous to `PluginKeymapScope` for keyboard events). The only exception is domain DSL evaluation (e.g. `CalculatorPlugin` math evaluator) performed strictly on `invocation.primaryValue`. The core parser implements delimiter-bounded segment parsing standardized on `--flag` and `-f`, capturing dynamic multi-word arguments without requiring quotes.
 - **Rationale**: Eliminates fragile ad-hoc regexes, quote rigidity, and redundant tokenizers across plugins; cleanly decouples platform input syntax from plugin logic; and establishes a strongly-typed, consistent AST contract across all plugin interaction modes.
+
+## ADR 12: Accessibility-Driven Native Window and Quick Switcher Overlay
+- **Decision**: Implement dual-engine window discovery (AXUIElement for window titles/documents + CGWindowList for Z-order), instant single-window fast path, and dedicated Liquid Glass Quick Switcher Overlay (`WindowSwitcherOverlayController`) driven by `.flagsChanged` release-to-commit mechanics.
+- **Rationale**: Avoids intrusive Screen Recording permissions, guarantees sub-millisecond single-window switching, and delivers a keyboard-first Exposé/Alt-Tab experience.
 
 

@@ -1,0 +1,524 @@
+#!/usr/bin/env python3
+"""
+kb — Unified Knowledge CLI Engine for ~/.dotfiles/ai/knowledge
+Ultra-low-token retrieval, fuzzy searching via fzf, JIT project context briefing,
+and structured gotcha capture across shared ecosystems and projects.
+"""
+
+import sys
+import os
+import re
+import shutil
+import subprocess
+import argparse
+from datetime import date
+from typing import List, Dict, Optional, Tuple
+
+AI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KNOWLEDGE_DIR = os.path.join(AI_DIR, "knowledge")
+SHARED_GOTCHAS_DIR = os.path.join(KNOWLEDGE_DIR, "_shared", "gotchas")
+META_DIR = os.path.join(KNOWLEDGE_DIR, "_meta")
+INDEX_FILE = os.path.join(KNOWLEDGE_DIR, "_index.md")
+
+STACK_PREFIX_MAP = {
+    "macos": "mac",
+    "odin": "odin",
+    "swift": "sw",
+    "android": "and",
+    "web": "web",
+    "shell": "sh",
+}
+
+PREFIX_TO_STACK = {
+    "mac": "macos",
+    "odin": "odin",
+    "sw": "swift",
+    "and": "android",
+    "web": "web",
+    "sh": "shell",
+}
+
+
+def check_fzf():
+    if not shutil.which("fzf"):
+        sys.stderr.write("Error: 'fzf' is required. Run 'brew install fzf' to install it.\n")
+        sys.exit(1)
+
+
+class GotchaEntry:
+    def __init__(self, entry_id: str, title: str, status: str, agent: str, raw: str, stack: str, filepath: str):
+        self.entry_id = entry_id
+        self.title = title
+        self.status = status
+        self.agent = agent
+        self.raw = raw
+        self.stack = stack
+        self.filepath = filepath
+
+    @property
+    def headline(self) -> str:
+        status_part = f" [{self.status}]" if self.status else ""
+        return f"[{self.entry_id}] {self.title}{status_part}"
+
+
+def parse_gotchas_file(filepath: str, stack_name: str) -> List[GotchaEntry]:
+    if not os.path.isfile(filepath):
+        return []
+
+    entries = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Split on lines starting with '## '
+    chunks = re.split(r'\n(?=##\s+)', content)
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk.startswith("## "):
+            continue
+
+        header_line = chunk.split("\n", 1)[0]
+        # Match: ## [<id>] [date] <title> [Status: ...] [Agent: ...]
+        m = re.match(
+            r'^##\s+\[([a-zA-Z0-9_-]+)\]\s+(?:(\d{4}-\d{2}-\d{2})\s+)?(.*?)(?:\s+\[Status:\s*([^\]]+)\])?(?:\s+\[Agent:\s*([^\]]+)\])?$',
+            header_line
+        )
+        if m:
+            entry_id = m.group(1)
+            title = m.group(3).strip()
+            status = m.group(4) or "Verified"
+            agent = m.group(5) or "manual"
+            entries.append(GotchaEntry(
+                entry_id=entry_id,
+                title=title,
+                status=status,
+                agent=agent,
+                raw=chunk,
+                stack=stack_name,
+                filepath=filepath
+            ))
+        else:
+            # Fallback for headers without ID: ## <title> or ## <date> <title>
+            m2 = re.match(r'^##\s+(?:(\d+)\.\s+|(?:\d{4}-\d{2}-\d{2}\s+))?(.*)$', header_line)
+            if m2:
+                title = m2.group(2).strip()
+                entries.append(GotchaEntry(
+                    entry_id="?",
+                    title=title,
+                    status="Verified",
+                    agent="manual",
+                    raw=chunk,
+                    stack=stack_name,
+                    filepath=filepath
+                ))
+
+    return entries
+
+
+def resolve_stack_file(stack_query: str) -> Optional[Tuple[str, str]]:
+    """Resolves stack query to (canonical_stack_name, filepath)."""
+    clean_query = stack_query.lower().strip()
+    if clean_query.endswith(".md"):
+        clean_query = clean_query[:-3]
+
+    # Check prefix map
+    if clean_query in PREFIX_TO_STACK:
+        canonical = PREFIX_TO_STACK[clean_query]
+        target = os.path.join(SHARED_GOTCHAS_DIR, f"{canonical}.md")
+        if os.path.isfile(target):
+            return canonical, target
+
+    # Check shared gotchas directly
+    target = os.path.join(SHARED_GOTCHAS_DIR, f"{clean_query}.md")
+    if os.path.isfile(target):
+        return clean_query, target
+
+    # Check project gotchas
+    project_target = os.path.join(KNOWLEDGE_DIR, clean_query, "gotchas.md")
+    if os.path.isfile(project_target):
+        return clean_query, project_target
+
+    # Partial match in shared gotchas
+    if os.path.isdir(SHARED_GOTCHAS_DIR):
+        for f in os.listdir(SHARED_GOTCHAS_DIR):
+            if f.endswith(".md") and clean_query in f.lower():
+                stem = f[:-3]
+                return stem, os.path.join(SHARED_GOTCHAS_DIR, f)
+
+    return None
+
+
+def get_all_entries() -> List[GotchaEntry]:
+    entries = []
+    # Shared gotchas
+    if os.path.isdir(SHARED_GOTCHAS_DIR):
+        for f in sorted(os.listdir(SHARED_GOTCHAS_DIR)):
+            if f.endswith(".md"):
+                stack = f[:-3]
+                entries.extend(parse_gotchas_file(os.path.join(SHARED_GOTCHAS_DIR, f), stack))
+
+    # Project gotchas
+    if os.path.isdir(KNOWLEDGE_DIR):
+        for item in sorted(os.listdir(KNOWLEDGE_DIR)):
+            if item.startswith("_") or item.startswith("."):
+                continue
+            p_gotchas = os.path.join(KNOWLEDGE_DIR, item, "gotchas.md")
+            if os.path.isfile(p_gotchas):
+                entries.extend(parse_gotchas_file(p_gotchas, item))
+
+    return entries
+
+
+# ─── Commands ─────────────────────────────────────────────────────────────────
+
+def cmd_list(args):
+    if args.stack:
+        resolved = resolve_stack_file(args.stack)
+        if not resolved:
+            sys.stderr.write(f"Error: Unknown stack or project '{args.stack}'.\n")
+            sys.exit(1)
+        stack_name, filepath = resolved
+        entries = parse_gotchas_file(filepath, stack_name)
+        if not entries:
+            print(f"No gotchas found in {stack_name}.")
+            return
+        for e in entries:
+            print(e.headline)
+    else:
+        # Overview of all stacks and projects
+        print("Shared Ecosystems:")
+        if os.path.isdir(SHARED_GOTCHAS_DIR):
+            for f in sorted(os.listdir(SHARED_GOTCHAS_DIR)):
+                if f.endswith(".md"):
+                    stack = f[:-3]
+                    count = len(parse_gotchas_file(os.path.join(SHARED_GOTCHAS_DIR, f), stack))
+                    print(f"  {stack:<12} ({count} gotchas)")
+
+        print("\nProjects:")
+        if os.path.isdir(KNOWLEDGE_DIR):
+            for item in sorted(os.listdir(KNOWLEDGE_DIR)):
+                if item.startswith("_") or item.startswith("."):
+                    continue
+                p_gotchas = os.path.join(KNOWLEDGE_DIR, item, "gotchas.md")
+                if os.path.isfile(p_gotchas):
+                    count = len(parse_gotchas_file(p_gotchas, item))
+                    print(f"  {item:<12} ({count} gotchas)")
+
+        print("\nRun 'kb list <stack>' to view headlines.")
+
+
+def cmd_get(args):
+    target_stack = args.stack
+    target_id = args.id
+
+    # If only one argument or if stack looks like an ID prefix
+    if not target_id and target_stack:
+        target_id = target_stack
+        target_stack = None
+
+    if target_stack:
+        resolved = resolve_stack_file(target_stack)
+        if resolved:
+            _, filepath = resolved
+            entries = parse_gotchas_file(filepath, resolved[0])
+            for e in entries:
+                if e.entry_id.lower() == target_id.lower():
+                    print(e.raw)
+                    return
+
+    # Fallback: search all entries by ID
+    all_entries = get_all_entries()
+    for e in all_entries:
+        if e.entry_id.lower() == target_id.lower():
+            print(e.raw)
+            return
+
+    sys.stderr.write(f"Error: Gotcha with ID '{target_id}' not found.\n")
+    sys.exit(1)
+
+
+def cmd_search(args):
+    query = args.query.strip()
+    if not query:
+        sys.stderr.write("Error: Query cannot be empty.\n")
+        sys.exit(1)
+
+    candidates = []
+    if args.stack:
+        resolved = resolve_stack_file(args.stack)
+        if not resolved:
+            sys.stderr.write(f"Error: Unknown stack or project '{args.stack}'.\n")
+            sys.exit(1)
+        stack_name, filepath = resolved
+        entries = parse_gotchas_file(filepath, stack_name)
+        for e in entries:
+            flat_body = re.sub(r'\s+', ' ', e.raw).strip()
+            candidates.append(f"{e.headline}\t{flat_body}")
+    else:
+        entries = get_all_entries()
+        for e in entries:
+            flat_body = re.sub(r'\s+', ' ', e.raw).strip()
+            candidates.append(f"[{e.stack}] {e.headline}\t{flat_body}")
+
+    if not candidates:
+        print("No gotchas available to search.")
+        return
+
+    candidate_input = "\n".join(candidates) + "\n"
+    try:
+        proc = subprocess.run(
+            ["fzf", "--filter", query],
+            input=candidate_input,
+            text=True,
+            capture_output=True,
+            check=False
+        )
+        output = proc.stdout.strip()
+        if output:
+            for line in output.split("\n"):
+                if line.strip():
+                    print(line.split("\t")[0])
+        else:
+            print("No matching gotchas found.")
+    except Exception as e:
+        sys.stderr.write(f"Error executing fzf: {e}\n")
+        sys.exit(1)
+
+
+def parse_index_registry() -> Dict[str, Dict[str, str]]:
+    registry = {}
+    if not os.path.isfile(INDEX_FILE):
+        return registry
+
+    with open(INDEX_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line.startswith("|") or "Project Name" in line or "|---" in line:
+                continue
+            parts = [p.strip() for p in line.split("|")[1:-1]]
+            if len(parts) >= 6:
+                name = parts[0].strip("` ")
+                registry[name] = {
+                    "path": parts[1].strip(),
+                    "stack": parts[2].strip(),
+                    "status": parts[3].strip(),
+                    "date": parts[4].strip(),
+                    "notes": parts[5].strip(),
+                }
+    return registry
+
+
+def detect_ecosystems_from_stack(stack_desc: str) -> List[str]:
+    desc = stack_desc.lower()
+    matched = []
+    if any(k in desc for k in ["cocoa", "appkit", "macos", "darwin", "carbon", "skylight"]):
+        matched.append("macos")
+    if any(k in desc for k in ["odin", "raylib"]):
+        matched.append("odin")
+    if any(k in desc for k in ["swift", "swiftui", "spm", "xcode"]):
+        matched.append("swift")
+    if any(k in desc for k in ["android", "compose", "appwidget", "kotlin", "java 17", "sqlite"]):
+        matched.append("android")
+    if any(k in desc for k in ["typescript", "javascript", "web", "worker", "vite", "rsc", "react"]):
+        matched.append("web")
+    if any(k in desc for k in ["shell", "zsh", "bash", "ci", "config"]):
+        matched.append("shell")
+    return list(dict.fromkeys(matched))
+
+
+def cmd_context(args):
+    registry = parse_index_registry()
+    project = args.project
+
+    if not project:
+        cwd = os.getcwd()
+        for name, meta in registry.items():
+            if cwd == meta["path"] or cwd.startswith(meta["path"] + "/"):
+                project = name
+                break
+        if not project:
+            project = os.path.basename(cwd)
+
+    meta = registry.get(project)
+    tech_stack = meta["stack"] if meta else "General"
+    notes = meta["notes"] if meta else "Workspace project"
+
+    print(f"# Context: {project}")
+    print(f"Stack: {tech_stack}")
+    print(f"Notes: {notes}")
+
+    # Project Architecture summary
+    arch_file = os.path.join(KNOWLEDGE_DIR, project, "architecture.md")
+    if os.path.isfile(arch_file):
+        with open(arch_file, "r", encoding="utf-8") as f:
+            arch_lines = f.readlines()
+        summary_lines = []
+        for line in arch_lines:
+            if line.startswith("# "):
+                continue
+            if line.startswith("## ") and len(summary_lines) > 0:
+                break
+            line_str = line.strip()
+            if line_str and not line_str.startswith("```"):
+                summary_lines.append(line_str)
+            if len(summary_lines) >= 3:
+                break
+        if summary_lines:
+            print("\nArchitecture:")
+            for sl in summary_lines[:2]:
+                print(f"  {sl}")
+
+    # Project Gotchas headlines
+    proj_gotchas_file = os.path.join(KNOWLEDGE_DIR, project, "gotchas.md")
+    if os.path.isfile(proj_gotchas_file):
+        p_entries = parse_gotchas_file(proj_gotchas_file, project)
+        if p_entries:
+            print(f"\nProject Gotchas ({project}):")
+            for e in p_entries[:3]:
+                print(f"  {e.headline}")
+
+    # Stack Gotchas headlines
+    ecosystems = detect_ecosystems_from_stack(tech_stack)
+    for eco in ecosystems:
+        eco_file = os.path.join(SHARED_GOTCHAS_DIR, f"{eco}.md")
+        if os.path.isfile(eco_file):
+            entries = parse_gotchas_file(eco_file, eco)
+            if entries:
+                print(f"\nRelevant Stack Gotchas ({eco}):")
+                for e in entries[:2]:
+                    print(f"  {e.headline}")
+
+    print("\nFetch full gotcha: kb get <stack> <id>")
+
+
+def get_next_id(filepath: str, prefix: str) -> str:
+    if not os.path.isfile(filepath):
+        return f"{prefix}-01"
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Search pattern like [prefix-NN]
+    nums = []
+    for m in re.finditer(re.escape(prefix) + r'-(\d+)', content, re.IGNORECASE):
+        try:
+            nums.append(int(m.group(1)))
+        except ValueError:
+            pass
+
+    next_num = max(nums) + 1 if nums else 1
+    return f"{prefix}-{next_num:02d}"
+
+
+def cmd_add(args):
+    if not args.shared and not args.project:
+        sys.stderr.write("Error: Must specify either --shared <stack> or --project <project>.\n")
+        sys.exit(1)
+
+    if not args.title or not args.symptom or not args.cause or not args.workaround:
+        sys.stderr.write("Error: --title, --symptom, --cause, and --workaround are all required.\n")
+        sys.exit(1)
+
+    today = date.today().isoformat()
+    status = args.status or "Verified"
+    agent = args.agent or os.environ.get("AI_AGENT") or os.environ.get("HARNESS") or "manual"
+
+    if args.shared:
+        stack = args.shared.lower().strip()
+        prefix = STACK_PREFIX_MAP.get(stack, stack[:3])
+        filepath = os.path.join(SHARED_GOTCHAS_DIR, f"{stack}.md")
+        anchor_label = "Anchors"
+    else:
+        project = args.project.lower().strip()
+        prefix = project[:3]
+        filepath = os.path.join(KNOWLEDGE_DIR, project, "gotchas.md")
+        anchor_label = "Files"
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    new_id = get_next_id(filepath, prefix)
+
+    entry_lines = [
+        f"\n## [{new_id}] {today} {args.title} [Status: {status}] [Agent: {agent}]",
+        f"**Symptom**: {args.symptom}",
+        f"**Cause**: {args.cause}",
+        f"**Workaround**: {args.workaround}",
+    ]
+    if args.files:
+        entry_lines.append(f"**{anchor_label}**: {args.files}")
+
+    entry_text = "\n".join(entry_lines) + "\n"
+
+    # If file doesn't exist, add heading
+    if not os.path.isfile(filepath):
+        header = f"# Gotchas — {args.shared or args.project}\n"
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(header)
+
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(entry_text)
+
+    print(f"Successfully added [{new_id}] to {filepath}:")
+    print(f"  Title: {args.title}")
+    print(f"  Status: {status} | Agent: {agent}")
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    check_fzf()
+
+    parser = argparse.ArgumentParser(
+        prog="kb",
+        description="Unified Knowledge CLI Engine for ~/.dotfiles/ai/knowledge"
+    )
+    subparsers = parser.add_subparsers(dest="subcommand", help="Subcommand to execute")
+
+    # list
+    p_list = subparsers.add_parser("list", help="List gotcha headlines (< 80 tokens)")
+    p_list.add_argument("stack", nargs="?", help="Optional stack or project name")
+
+    # get
+    p_get = subparsers.add_parser("get", help="Surgically retrieve a single gotcha (< 100 tokens)")
+    p_get.add_argument("stack", help="Stack or project name (or ID directly)")
+    p_get.add_argument("id", nargs="?", help="Gotcha entry ID (e.g. mac-01, sw-03)")
+
+    # search
+    p_search = subparsers.add_parser("search", help="Fuzzy search gotchas via fzf")
+    p_search.add_argument("query", help="Search query string")
+    p_search.add_argument("--stack", "-s", help="Filter search to specific stack or project")
+
+    # context
+    p_context = subparsers.add_parser("context", help="JIT smart briefing (< 250 tokens)")
+    p_context.add_argument("project", nargs="?", help="Optional project name")
+
+    # add
+    p_add = subparsers.add_parser("add", help="Add new gotcha adhering to invariants")
+    p_add.add_argument("--shared", help="Target shared ecosystem stack")
+    p_add.add_argument("--project", help="Target project name")
+    p_add.add_argument("--title", required=True, help="Short descriptive title")
+    p_add.add_argument("--symptom", required=True, help="What it looks like when hit")
+    p_add.add_argument("--cause", required=True, help="Why it happens")
+    p_add.add_argument("--workaround", required=True, help="How to resolve or avoid it")
+    p_add.add_argument("--files", "--anchors", help="Anchoring symbols, files, or versions")
+    p_add.add_argument("--status", choices=["Provisional", "Verified"], default="Verified", help="Confidence status")
+    p_add.add_argument("--agent", help="Harness name (antigravity, codex, opencode, pi, manual)")
+
+    args = parser.parse_args()
+
+    if not args.subcommand:
+        parser.print_help()
+        sys.exit(0)
+
+    if args.subcommand == "list":
+        cmd_list(args)
+    elif args.subcommand == "get":
+        cmd_get(args)
+    elif args.subcommand == "search":
+        cmd_search(args)
+    elif args.subcommand == "context":
+        cmd_context(args)
+    elif args.subcommand == "add":
+        cmd_add(args)
+
+
+if __name__ == "__main__":
+    main()

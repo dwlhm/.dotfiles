@@ -14,3 +14,9 @@
 - **String Arena**: A contiguous `Uint8Array` byte region partitioned into fixed-size string slots (`stringSlotSize`), accompanied by a `Uint16Array` view storing the exact byte length written for each string slot.
 - **Absolute Child Path**: An integer array `[0, 1, 0]` describing the exact DOM hierarchy navigation path from a template root element to a dynamic target element.
 - **Monomorphic Patch Function**: An AOT-generated JavaScript function with a fixed shape and stable property accesses, optimized for V8 inline caching and TurboFan JIT compilation.
+- **Component Kind**: A component category identified by a stable name (kebab-case of the `defineView` const name) and a 1-based numeric id assigned by the build plugin; stored per entity in the `kind` column; drives view filtering, action routing, and slot containers.
+- **FieldTable**: Per-descriptor schema (`fields`) mapping named template fields (`item.<name>`) to { kind: string|number, slot, dirtyMask, bindings }; the single contract between template, main thread, and worker.
+- **define\* Combinators**: The public API language (`defineView`, `defineShell`, `defineTick`, `defineAction`, `defineFormat` from `@teras/runtime`); build-time markers resolved and split by `@teras/unplugin`; runtime identity fallbacks.
+- **Auto-Dirty Accessor**: Worker-side record property (one prototype per FieldTable, reused record view per kind) whose setter writes the SoA column AND atomically sets the field's dirtyMask — user code never calls `setDirty`.
+- **Shell Slot**: `<!--teras-slot:<kind>-->` comment placeholder in a shell descriptor, expanded by `createApp` into a `data-teras-kind` container where that kind's entities instantiate.
+- **TerasAppGraph**: Typed app graph exported by `virtual:teras/app` ({ shell, views, createWorker }); the value passed to `createApp`.

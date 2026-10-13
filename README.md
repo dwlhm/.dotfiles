@@ -29,8 +29,33 @@ Runtime-managed, not tracked (see `.gitignore`): `ai/adapters/antigravity/{confi
 ## Setup on a new machine
 
 1. Clone the repo (e.g. to `~/.dotfiles`).
-2. Run `ai/scripts/sync.sh` to generate agent stubs.
-3. Create the symlinks listed in the wiring table.
-4. Restore machine-specific files (`ai/adapters/antigravity/config.json`) or let AGY create fresh ones on first run.
+2. Install mandatory dependencies:
+   ```sh
+   brew install fzf
+   ```
+3. Run `ai/scripts/sync.sh` to generate agent stubs and inline core rules.
+4. Create the symlinks listed in the wiring table.
+5. Restore machine-specific files (`ai/adapters/antigravity/config.json`) or let AGY create fresh ones on first run.
+
+## Knowledge CLI (`ai/scripts/kb`)
+
+A low-token, surgical knowledge retrieval tool for both developers and AI agents:
+
+```sh
+# JIT project context briefing (< 250 tokens)
+ai/scripts/kb context [project]
+
+# List gotcha headlines (< 80 tokens)
+ai/scripts/kb list [ecosystem-or-project]
+
+# Fuzzy search gotchas using fzf
+ai/scripts/kb search "<query>" [--stack <ecosystem>]
+
+# Surgically fetch a single gotcha (< 100 tokens)
+ai/scripts/kb get <ecosystem-or-project> <id>
+
+# Add a new gotcha enforcing Symptom, Cause, Workaround invariants
+ai/scripts/kb add --shared macos --title "..." --symptom "..." --cause "..." --workaround "..."
+```
 
 See `ai/README.md` for full adapter and knowledge-base documentation.

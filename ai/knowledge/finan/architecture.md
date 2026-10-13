@@ -1,6 +1,37 @@
 # Architecture — finan
 
-## 2026-09-05 Current State
+## 2026-09-09 Current State: schema 14 and recovery boundaries
+
+Paths below are relative to `app/src/main/java/com/dwlhm/finan/`. Final runtime verification remains ACTIVE in `wip.md`; this records implemented structure, not a completion claim.
+
+Production:
+
+```ts
+FinanApplication.onCreate
+  → AppServices.create
+    → FinanDatabaseHelper [schema 14]
+  → BackupService.recoverPendingPreferences
+    → [replay failure] BackupRecoveryGate.requireRecovery
+      → current/future Activity recovery cover
+        → [retry] BackupService.recoverPendingPreferences
+          → [success] MainActivity restart
+BackupControls
+  → BackupService.inspect [authenticate before parsing, current schema only, 32 MiB maximum]
+    → Preview
+      → [explicit replace] BackupService.restore
+        → {financial tables + preference journal, one SQLite transaction}
+          → preference replay
+            → [commit failure] application recovery gate; database already committed
+```
+
+Evidence: `FinanApplication.onCreate() @ FinanApplication.java:12`; `AppServices.create(Context) @ ui/common/AppServices.java:119`; `FinanDatabaseHelper.DATABASE_VERSION @ data/db/FinanDatabaseHelper.java:27`; `BackupService.inspect(InputStream,char[]) @ service/backup/BackupService.java:96`; `BackupService.restore(Preview) @ service/backup/BackupService.java:117`; `BackupService.recoverPendingPreferences() @ service/backup/BackupService.java:170`; `BackupRecoveryGate.requireRecovery(Context) @ service/backup/BackupRecoveryGate.java:41`; `BackupControls @ ui/settings/BackupControls.java:26`.
+
+- SQLite migration 14 adds `transaction_templates.due_month` and `scheduled_occurrences`, keyed by `(template_id, due_date)`; recorded/skipped dates are explicit. Evidence: `Migration014ScheduledOccurrences.migrate(SQLiteDatabase) @ data/migration/Migration014ScheduledOccurrences.java:8`.
+- CSV remains open, unencrypted append import; it does not invoke encrypted full replacement. Evidence: `ImportService.importFrom(InputStream) @ service/export/ImportService.java:126`.
+- Reminder consent and notification bookkeeping are device-only preferences, excluded from portable backup. Evidence: `ReminderPreferences @ data/prefs/ReminderPreferences.java:7`; backup preference allowlist at `service/backup/BackupService.java:32`.
+- App lock protects UI/navigation and masks widgets, not local SQLite encryption; its background grace period is 60 seconds. Evidence: `AppLock.LOCK_TIMEOUT_MS @ service/privacy/AppLock.java:29`, `AppLock.afterUnlock(Activity,Runnable) @ service/privacy/AppLock.java:70`.
+
+## 2026-09-05 Historical State
 Capture-first financial tracker for Android (production v1). Pure **Java 17** + Android Views (XML, no Compose), SQLite with manual migrations, zero external frameworks (no DI, no ORM, no coroutines). Local-first writes; UI in Indonesian by default (`resConfigs en, id`).
 
 ### Layer Map

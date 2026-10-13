@@ -23,26 +23,40 @@ for "quick" tasks.
 
 ## 2. Briefing Template
 
-Every brief to the `implementer` MUST include these four sections.
+Every brief to the `implementer` MUST include these sections.
 Omitting any section risks the implementer filling gaps with assumptions.
 
 ```
 ## Goal
 [One sentence. What is the end state? Not the steps — the outcome.]
 
-## Context
-- Files involved: [list absolute paths]
-- Relevant line ranges: [e.g. L45-L78 in foo.ts]
-- Key constraints: [naming conventions, APIs to use/avoid, existing patterns]
-- Plan reference: [attach or summarize the approved implementation_plan.md section]
+## Context (Orchestrator-Verified Facts)
+- Files involved: [absolute paths]
+- Verified facts: [exact `symbol @ file:line`, pasted signatures, and the
+  CURRENT text of every region to be edited. Only facts the orchestrator read
+  in this session. Mark anything unverified as [UNVERIFIED].]
+- Result / Crack / Need: [dataflow + sink, failure modes, preconditions]
+- Change impact: [callers, consumers, blast radius]
 
 ## Exact Changes Required
-[Enumerate every file change. Be specific: "In foo.ts, replace function X with Y.
-Add import Z at line 3. Do not touch anything outside of these bounds."]
+[Every file change, specified as replace-this-text-with-that-text or exact
+signatures. Literal content (docs, configs) is supplied verbatim and must be
+written byte-for-byte.]
 
-## Acceptance Criteria
-[How to verify the task is done correctly. Include: commands to run, expected
-output, files that must exist, lint/test commands that must pass.]
+## Locked Values
+[Expected test values, thresholds, counts. The implementer must never edit
+these; a mismatch is reported, not tuned.]
+
+## Out of Scope / Do Not Touch
+[Paths, files, and behaviors that must not change. Git: commit or not.]
+
+## Stop Conditions
+[Situations where the implementer must stop and report instead of improvising,
+e.g. a referenced symbol does not exist or its current text differs.]
+
+## Acceptance Criteria & Required Evidence
+[Commands to run and the verbatim output required in the report, plus
+`git status --short` / `git diff --stat`.]
 ```
 
 **Keep briefs focused.** Do NOT forward the full conversation transcript.
@@ -61,6 +75,12 @@ When the implementer returns, check:
 | No scope creep | Only the specified files were touched |
 | Conventions preserved | Surrounding code style not broken |
 | Verification passed | Lint/tests ran and passed (if specified) |
+
+**Never trust the report alone.** Independently re-run `git status --short`,
+`git diff --stat`, and the acceptance commands before accepting. Treat these as
+FAILED and re-brief: an empty or missing report (e.g. "(no output)"), a report
+claiming changes that `git diff` does not show, a coverage claim without a test
+name and assertion line, an edited locked value, or an undeclared behavior change.
 
 If all pass → mark task done, update second brain if applicable.
 
@@ -81,6 +101,7 @@ If any fail → see §4 below.
 | Implementer deviated from plan | Plan was ambiguous | Fix the plan quality (§0 pipeline) — not the implementer |
 | Implementer used wrong tools | Missing tool permission | Adjust the per-harness `permission` frontmatter in `ai/scripts/sync.sh` |
 | Poor output quality across the board | Model underpowered for the task | Pin a stronger `model` in the per-harness frontmatter in `ai/scripts/sync.sh` as last resort |
+| Report claims work that is not in the diff | Weak evidence rules or vague brief | Re-brief with verified facts + required evidence; tighten Evidence Rules in implementer.md |
 
 To edit the implementer:
 
@@ -135,7 +156,7 @@ into the generated stubs.
 
 | Value | When to use |
 |---|---|
-| *(unset)* | Default. Inherits the user's configured model. |
+| `PI_SUBAGENT_MODEL` in `sync.sh` (default `antigravity/gemini-3.8-flash`) | Default for all pi stubs. Briefs must be fully specified because the executor is a fast model. |
 | Cheaper capable model | Pin one for execution work when the user's default is expensive. |
 | Stronger model | Only when the default demonstrably fails and the task requires deep reasoning. |
 
@@ -144,8 +165,8 @@ into the generated stubs.
 1. Write the pure body to `~/.dotfiles/ai/agents/<name>.md`.
 2. Add its description and per-harness frontmatter to `ai/scripts/sync.sh`.
 3. Run `~/.dotfiles/ai/scripts/sync.sh` to regenerate stubs into machine
-   config. This is required only when adding, removing, or renaming an
-   agent — editing an existing body needs no re-sync.
+   config. Required after adding, removing, renaming, or editing an
+   agent body (pi stubs inline the body).
 4. Load requirements are harness-specific — see your harness entry file
    (e.g. restart requirements). Then invoke the `<name>` subagent via the
    harness's subagent delegation mechanism.

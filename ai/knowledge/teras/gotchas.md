@@ -29,3 +29,27 @@
 ### 5. Double Deletion and Free-List Corruption
 - **Gotcha**: If an entity is freed multiple times or freed while pending unmount, the slot index is pushed onto the free-list stack multiple times, corrupting pool capacity.
 - **Solution**: The `EntityPool.free` method guards against `ENTITY_INACTIVE` and generation mismatches before pushing onto `freeList`.
+
+### 6. Vite Does Not Propagate User Plugins Into Worker Bundles
+- **Gotcha**: `new Worker(url, { type: 'module' })` sub-bundles ignore the project's Vite plugin list; transforms/virtual modules the worker code needs silently fail at build.
+- **Solution**: In `vite.config.ts`, set `worker.plugins` explicitly to include the same `@teras/unplugin` plugin instance.
+
+### 7. Virtual Module Ids Re-entering the Transform Hook
+- **Gotcha**: A virtual id that ends with a watched suffix (e.g. `virtual:teras/view:/…/app.teras.tsx` ends in `.teras.tsx`) gets fed back into the plugin's own `transform`, crashing the build.
+- **Solution**: `transform` must early-return for the plugin's own `virtual:teras/*` ids; regression-tested in `packages/unplugin/tests`.
+
+### 8. Numeric Class/Attr Bindings Must Not Decode the String Arena
+- **Gotcha**: Projecting a numeric field into a `class`/`attr` binding by calling `decodeStringSlot(layout, id, slot)` treats the NUMERIC slot index as a STRING slot index → `RangeError` (numeric fields live in Float64 rows, not the arena).
+- **Solution**: Numeric class/attr bindings read `layout.numbers[id * numNumericFields + slot]` and project `String(value)` — fixed in both the interpretive fallback (`dom/loop.ts`) and AOT patch (`compiler/codegen.ts`).
+
+### 9. deltaTime Unit Mismatch (worker ticks)
+- **Gotcha**: `WorkerSystem.tick()` contract is SECONDS (JSDoc + legacy tests), but the component-registry JSDoc says ticks receive `deltaTimeMs`.
+- **Solution**: Treat `dt` as seconds today; true-ms semantics requires converting in `startLoop` — decide before relying on it (playground throttles via its own accumulator instead).
+
+### 10. Chrome Rejects `encodeInto`/`decode` on SAB-Backed Views
+- **Gotcha**: In Chrome, `TextEncoder.encodeInto(text, sabUint8Subarray)` and `TextDecoder.decode(sabUint8Subarray)` throw — Node tolerates shared-buffer views, so vitest passes while the real browser dies mid-frame (worker death after ~1 entity; silent in dev).
+- **Solution**: In `@teras/core` `encodeStringSlot`/`decodeStringSlot`, encode/decode into cached NON-shared scratch buffers and copy via `set()`/byte copy. Regression-tested with Chrome's exact rejection semantics.
+
+### 11. Virtual `?worker` Imports Are Dead in Vite Dev
+- **Gotcha**: `import Worker from 'virtual:teras/worker?worker'` works in build but in dev Vite's `fileToDevUrl` maps the virtual id to `/@fs/virtual:teras/worker`, which hits the SPA HTML fallback; a module worker served HTML fails to parse SILENTLY (no console error) — worker never boots.
+- **Solution**: `@teras/unplugin` `configureServer` middleware (registered AFTER the COOP/COEP header middleware, which must be FIRST) intercepts `/@fs/virtual:teras/*` and serves `server.transformRequest(virtualId)` output as `text/javascript`. COOP/COEP must also be set on the intercepted worker response or Chrome fails with `ERR_BLOCKED_BY_RESPONSE`.

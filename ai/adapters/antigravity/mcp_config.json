@@ -1,3 +1,21 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "term": {
+      "command": "/Users/dwlhm/project/term/bin/term-mcp",
+      "disabled": true
+    },
+    "supernova": {
+      "serverUrl": "https://mcp.supernova.io/mcp/c/346270-supernova-default"
+    },
+    "pencil": {
+      "command": "/Applications/Pen.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64",
+      "args": [
+        "--app",
+        "desktop",
+        "--agent",
+        "antigravity"
+      ],
+      "env": {}
+    }
+  }
 }

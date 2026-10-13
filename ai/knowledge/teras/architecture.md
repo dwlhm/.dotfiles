@@ -1,8 +1,18 @@
 # Architecture — Teras
 
-## 2026-09-01 Current State
+## 2026-09-05 — Familiar API Surface (define* combinators) LANDED
 
-Teras is a high-performance, fixed-memory, data-oriented UI runtime that separates data mutation from DOM projection across threads via a single contiguous `SharedArrayBuffer`.
+New consumer-facing layer on top of the existing 6-layer engine (engine semantics unchanged):
+
+- **New package `@teras/runtime`** (`packages/runtime`): `defineView` / `defineShell` / `defineTick` / `defineAction` / `defineFormat` combinators (identity fallbacks + branded token types), `createApp` re-export, ambient `item` declaration.
+- **Authoring model**: one `app.teras.tsx` file = whole app; shell + component views + worker ticks/actions + main-thread formatters as `define*` call sites; kind tokens are view const VALUES (no string actions); normal ESM imports for splitting.
+- **`@teras/unplugin` pipeline**: AST-resolves define* call sites → compiles JSX via @teras/compiler (knownComponents/actionIds) → splits each module into `virtual:teras/view:<path>` (descriptor+formatters, main thread) and `virtual:teras/system:<path>` (tick/action fns, worker) → aggregates `virtual:teras/worker` (WorkerSystem bootstrap: registerComponentKind/Tick/Action, startLoop(60)) and `virtual:teras/app` (TerasAppGraph + createWorker).
+- **`@teras/dom`**: `createApp(graph, options)` absorbs memory creation (layout DERIVED from field tables), worker attach, shell instantiation, `<!--teras-slot:<kind>-->` comment → container expansion, per-kind instantiator/lifecycle/delegator wiring, formatter pass (patch + customUpdater now BOTH run; formatter first, onApplyBindings after). renderPass kind-filters instantiators (`kindId` bound).
+- **`@teras/core`**: new `kind: Uint8Array` column (component kind id, 1..255, 0 = KIND_UNASSIGNED) between `state` and `dirty`.
+- **`@teras/worker`**: `ComponentRegistry` — monomorphic auto-dirty record accessors (one prototype per FieldTable, reused record view per kind), kind-scoped `KindCtx` (each/spawn/byId/destroy), kind-routed action dispatch, registration-ordered ticks.
+- **Playground** is migrated: single `src/app.teras.tsx` + 3-line-ish `main.ts`; surface grep gate test in `playground/tests/surface.test.ts` bans engine vocabulary.
+
+## 2026-09-01 Engine State (unchanged below)
 
 ### Layer Map
 

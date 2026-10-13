@@ -1,26 +1,32 @@
 # Second Brain
 
-Persistent per-project knowledge base plus a shared dependency registry:
+Persistent knowledge base: `~/.dotfiles/ai/knowledge/`. Full format:
+`ai/skills/second-brain/SKILL.md`.
 
-```
-~/.dotfiles/ai/knowledge/<project-name>/        — architecture.md, adr.md,
-  vocabulary.md, gotchas.md, wip.md
-~/.dotfiles/ai/knowledge/_shared/dependencies/  — one file per dependency,
-  with a project usage table
-```
+## Research Protocol (focused & token-efficient)
 
-`<project-name>` resolution: match the workspace path in
-`~/.dotfiles/ai/knowledge/_index.md`; fallback to the `basename` of `$PWD` at
-session start.
+- Retrieve surgically with `ai/scripts/kb` (`context | list | search | get`);
+  never dump whole files into context.
+- Read relevant knowledge before Tier 2, ambiguous, debugging, or dependency work.
+- Skip the KB for trivial Tier 0–1 tasks.
 
-**Read** the relevant knowledge files before starting work for Tier 2,
-ambiguous, debugging/integration, or dependency tasks; skip for trivial Tier 1
-(read only the files relevant to the current task).
+## Capture-on-Novelty
 
-**Write**: on session end, update the affected knowledge files if non-obvious
-knowledge was discovered — decision → `adr.md`, dependency → `_shared/dependencies/`,
-trap → `gotchas.md`, term → `vocabulary.md`, status → `wip.md`, structure →
-`architecture.md`; else skip silently.
+Encountering an unknown case, gotcha, pattern, or constraint → record it to the
+KB immediately (via Write Gate), not only at session end.
 
-Format conventions and the on-demand indexing protocol: see
-`~/.dotfiles/ai/skills/second-brain/SKILL.md`.
+## Write Gate
+
+1. **Dedupe** — read the target file first; update in place, never append duplicates.
+2. **Precision** — at least one verifiable anchor (`symbol @ file:line`, version, date).
+3. **Reconcile** — resolve contradictions before committing.
+
+## Gotcha Taxonomy (2-Question Rule)
+
+1. General to the ecosystem (another project could hit it) → `_shared/gotchas/<eco>.md`.
+2. Bound to this project's logic → `<project>/gotchas.md`.
+
+## Graduation
+
+A gotcha or pattern recurring in ≥ 2 projects → `_meta/candidates.md` → graduate
+to a skill or a core rule.

@@ -1,5 +1,16 @@
 # Work In Progress (WIP) & Status — Teras
 
+## 2026-09-05 Familiar API Surface — LANDED, browser-verified
+
+The define* combinator surface is implemented across all layers and verified END-TO-END in real Chromium (Playwright, 16/16 checks): telemetry 1000 entities animating @60fps with formatters, shock market, entity-pool resize, pause freeze/resume (entity-owned PauseButton with cross-kind read), TodoMVC CRUD + batch + clear + filters, tab switching, zero console errors. 121/121 unit tests green; typecheck clean except 2 pre-existing compiler-test errors; production build + COOP/COEP verified.
+
+Defects found & fixed during browser verification (all regression-tested):
+1. main.ts HUD element queries ran before createApp mounted the shell → null refs; onFrame throw then killed the rAF loop permanently → loop now try/finally-schedules next frame.
+2. Virtual `?worker` import dead in Vite dev (see gotcha #11) → dev middleware fix.
+3. Chrome SAB `encodeInto`/`decode` rejections (see gotcha #10) → core scratch-buffer fix.
+- [ ] **Known v1 gaps to revisit**: shell event dispatch carries no payload (payload-carrying controls use `appHandle.dispatch` escape hatch in main.ts); `FrameStats` lacks per-kind aggregates (todo-count reads via `appHandle.layout`); recycled-count HUD dropped (no stat); EDIT_TODO dblclick inert (delegator sends no payload); worker `startLoop` doc says deltaTimeMs but tick contract is seconds; kindId ordering on late-registered modules not retroactively fixed; formatters must be pure + file-local; per-kind column groups (heterogeneous entity kinds sharing one pool) still deferred; tab-switch/filter-button main.ts wiring is main-thread-only UI state.
+- [ ] Roadmap (pre-existing): WebGL/WebGPU backend, WASM mutators, DevTools extension.
+
 ## 2026-09-01 Solidification Status
 
 ### Completed Core Solidification

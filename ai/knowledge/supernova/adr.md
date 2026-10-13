@@ -1,0 +1,11 @@
+# Decisions — supernova
+
+## 2026-10-05 Component-set ownership: single generated manifest
+
+**Context**: `docs/components/*.md` and the six components in `packages/{react,svelte,vue,vue2}/src` (`Badge, Button, Card, Input, StatusBadge, Typography`) were never supplied by Supernova; they came from the dev mock fixture `exporter/mock/data/components.json` via commit `dfefc34`. Supernova's GitHub sync supplies only `index.ts` + `tokens/`. Despite that, the published site advertised a component catalog because the component set was hardcoded in three places: the VitePress `nav`/`sidebar` in `docs/.vitepress/config.mts`, the static `generateIndexDoc()` template in `scripts/generate-docs.js`, and the committed artifacts themselves.
+
+**Decision**: `scripts/generate-components.js` is the single owner of the component set. It always writes `docs/.vitepress/components.generated.json` (`{ "components": [{ "name", "slug" }] }`, sorted by name, no timestamp, no absolute paths). `docs/.vitepress/config.mts` and `scripts/generate-docs.js` read that manifest and emit component-flavoured nav, sidebar, hero, package rows, quick-start sections and pages only when it is non-empty. On a missing components artifact the generator prunes every file recorded in the previous manifest plus `runtime/`, rewrites valid empty barrels ending in `export {}`, empties the manifest, and exits 0; `generate-docs.js` removes `docs/components/` and prunes orphan pages.
+
+**Rationale**: one authoritative owner per state; previously the hardcoded literals won over the real artifact, producing detached state. Pruning from the previous manifest keeps ownership explicit (only files this generator created are deleted) and keeps `npm run build:packages` green with zero components, because an empty package still needs a valid build entry.
+
+**Consequences**: the site shows tokens only until Supernova syncs a `components/` directory, at which point the full component surface returns with no code change. `npm run generate:mock` restores the six mock components for local development. `docs/ui-ux-guidelines.md` deliberately still names `StatusBadge`/`Input` as naming-convention examples and is NOT generated. Anyone re-adding a component to the nav or sidebar by hand re-creates the drift.

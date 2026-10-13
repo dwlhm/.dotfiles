@@ -1,15 +1,32 @@
 # Architecture: Titik Command Center
 
 ## 1. Overview
-**Titik** (*"Dot / Point"*) is a native macOS Command Center built with **Swift 6**, **SwiftUI**, and **AppKit** under Swift Package Manager (SPM). It delivers sub-millisecond keyboard-first interactions, native macOS **Liquid Glass** HUD translucency (`NSVisualEffectView`), a clean modular architecture, dynamic C ABI plugin capabilities, zero-allocation fuzzy searching, query-to-command AST parsing, and robust Unit/E2E test suites.
+**Titik** (*"Dot / Point"*) is a native macOS Command Center built with **Swift 6**, **SwiftUI**, and **AppKit** under Swift Package Manager (SPM). It delivers sub-millisecond keyboard-first interactions, native macOS **Liquid Glass** HUD rendering (`SwiftUI.glassEffect` on macOS 26+), a clean modular architecture, dynamic C ABI plugin capabilities, zero-allocation fuzzy searching, query-to-command AST parsing, and robust Unit/E2E test suites.
 
-## 2. Layer Boundaries & Component Layout
-- **`TitikCore`**: Coordinates system services and foundation models: `ClipboardManager` (`NSPasteboard` watcher & history), `SystemCommands` (10 native macOS actions), `AppLauncher` (`/Applications` indexer, running process tracker & launcher), `FileBrowser` (tilde-expanded directory navigator, media type classifier & scoped file searcher), `ConfigLoader` (`~/.config/titik/config.json`), `FuzzyMatcher`, and `Logger` (subsystem-tagged structured logger).
-- **`TitikKeymap`**: Virtual keycode mapping (`Keycode`), modifier bitmasks (`KeyModifier`), collision-preventing `KeymapRegistry`, and Carbon global hotkey listener (`HotkeyManager`).
-- **`TitikParser`**: Pure query-to-AST parser (`CommandLexer`, `CommandParser`, `CommandAST`) treating user inputs as structured commands.
-- **`TitikUI`**: Pure design system tokens (`Theme`), pastel category palette (`.application`, `.systemCommand`, `.clipboard`, `.calculator`, `.plugin`, `.custom`, `.file`, `.directory`), `VisualEffectView` HUD container, `KeycapView`, `SearchBarView`, `ResultsListView`, `PreviewPaneView` (rich preview renderer for images, PDFs, video, audio, code/text, directories), `FooterView`, and `PluginUIRepresentable` protocols.
-- **`TitikPlatform`**: Native macOS platform orchestrator (`WindowController`) managing the floating borderless `NSPanel`, 58% golden ratio screen centering, focus handling, dynamic preview pane collapse/expand, and UI composition (`UIOrchestrator`).
-- **`TitikPlugins`**: Native Swift plugin manager (`PluginManager`) and dynamic bundle loader (`PluginHost`) loading `.titikplugin` bundles, managing whitelist registrations (`PluginsConfig`), handling reindexing, and providing the first-party `PluginSystemPlugin` (`!plugin reload`).
-- **`TitikSearch`**: Multi-provider search aggregator (`SearchEngine`), boundary-aware `FuzzyMatcher` (FZF scoring algorithm), and AST `MathEvaluator`.
-- **`Titik`**: Application entrypoint (`main.swift`, `AppDelegate.swift`) configured with `LSUIElement` accessory app policy.
+## 2. Layer Boundaries & Component Layout (current, post-migration)
 
+Twelve SwiftPM library products (see `Package.swift`); `Titik` and `TitikWorker` executables are Xcode-owned schemes:
+
+- **`TitikDomain`**: Foundation models, config domain types, `BangSuggestionHelper` (canonical).
+- **`TitikContracts`**: Ports/abstractions (`BuiltinPorts`, `ShortcutPorts`, `FilePreviewDescriptor`).
+- **`TitikParser`**: Pure query-to-AST parser (`CommandLexer`, `CommandParser`, `CommandAST`).
+- **`TitikInfrastructure`**: System services — `ClipboardManager`, `AppLauncher`, `FileBrowser`, `ConfigLoader`, `ConfigShortcutStore`, `SystemCommands`, `WindowManager`, `Logger`, `EmojiCatalog`.
+- **`TitikSearch`**: `SearchEngine` (multi-provider aggregator), FZF-style fuzzy matching, `MathEvaluator`.
+- **`TitikDesignSystem`**: `Theme` tokens and native glass rendering, components (`KeycapView`, `TitikGlassCard`, `TitikFormField`, Toast).
+- **`TitikPluginContracts`**: `TitikPlugin`, `PluginUIRepresentable`, `PluginKeymapScope` interfaces.
+- **`TitikPluginUI`**: Plugin UI contracts (depends on TitikPluginContracts + TitikDesignSystem).
+- **`TitikPluginRuntime`**: Plugin bundle hosting (`PluginHost`/`PluginManager`) and worker IPC.
+- **`TitikBuiltins`**: Built-in plugins (App, Calculator, Clipboard, Emoji, FileBrowser, Launcher, Notes, PluginSystem, Shortcuts, SystemCommands, Window) + `BuiltinPluginsSearchProvider`.
+- **`TitikLauncher`**: Launcher UI orchestration — `LauncherViewModel`, `LauncherKeyHandler`, `LauncherRootView`, `LauncherServices` (ports: `LauncherEffects`, `WindowManaging`, `ClipboardProviding`, `EmojiProviding`), `AutoPaster`.
+- **`TitikPlatform`**: `WindowController` (floating `NSPanel`), `WindowSwitcherOverlayController`, `UIOrchestrator`.
+- App composition (`Sources/Titik`): `AppCompositionRoot`, `PluginCommandDispatcher`, `BuiltinServices.install` — app-target only, not a library product.
+
+Historical names (`TitikCore`, `TitikKeymap`, `TitikUI`, `TitikPlugins`, `ConfigWatcher`) are NOT current targets.
+
+## 2026-10-03 Native Liquid Glass Contract
+
+- **Result**: Launcher and switcher surfaces use Apple SwiftUI `glassEffect` on macOS 26+; the system owns the material rendering. Native effect clearance is reserved in window and content geometry.
+- **Crack**: Older macOS versions and Reduce Transparency use an explicitly opaque surface. This is a fallback, not Liquid Glass.
+- **Need**: Native API availability and the accessibility environment determine the branch. No `NSVisualEffectView`, blur/gradient/tint stacks, or manual shadows may emulate Liquid Glass.
+- **Implementation anchors**: `NativeGlassModifier.body @ Sources/TitikDesignSystem/Theme.swift:160`; `HUDLayout @ Sources/TitikDesignSystem/Theme.swift:197`.
+- **Source**: User correction on 2026-10-03; ADR 6; [Apple custom-view Liquid Glass API](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views).

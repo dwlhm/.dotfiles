@@ -1,10 +1,15 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  // Loaded directly from core — no sync/copy buffer needed
+  // Always-loaded core rules — lean set for low context overhead.
+  // On-demand rules (gates, code-quality) are read by the orchestrator
+  // when the relevant phase begins.
   "instructions": [
-    "/Users/dwlhm/.dotfiles/ai/core/*.md"
+    "/Users/dwlhm/.dotfiles/ai/core/orchestration.md",
+    "/Users/dwlhm/.dotfiles/ai/core/design-thinking.md",
+    "/Users/dwlhm/.dotfiles/ai/core/language.md",
+    "/Users/dwlhm/.dotfiles/ai/core/second-brain.md"
   ],
-  // Canonical skills (second-brain, subagent-management, ui-contrast)
+  // Canonical skills (second-brain, subagent-management, ui-contrast, ui-ux-interaction-reasoning)
   // + adapter-local skills (plugin-manager, observability)
   "skills": {
     "paths": [
