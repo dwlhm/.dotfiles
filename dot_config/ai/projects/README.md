@@ -10,6 +10,5 @@ Before working in a project, match the current directory (or an ancestor) agains
 |---|---|
 | `~/project/dashd` | `dashd.md` |
 | `~/project/term` | `term.md` |
-| `term-mcp` (MCP tool) | `term-mcp.md` |
 
 Rules: only verified facts; one file per project; update this index when adding files.
