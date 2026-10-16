@@ -44,12 +44,13 @@ Before declaring a task complete:
 3. Re-read the files you changed.
 4. Summarize what changed, why, and what was verified.
 
-## Knowledge Base & Verification
+## Knowledge Base & Project Context
 
-- A shared knowledge base lives at `~/.config/ai-knowledge/`. It holds verified platform APIs, project invariants, and conventions so every agent shares the same baseline.
-- Before using an unfamiliar API, read the relevant topic file there first; never guess signatures.
-- Start from `README.md` (the index) and read only the files you need — do not load the whole directory.
-- If the knowledge base does not cover it, verify against the installed library or existing code, then append the verified fact back to the knowledge base for future sessions.
+- Shared agent context lives at `~/.config/ai/`: `knowledge/` (platform/language facts) and `projects/` (per-project context).
+- Before working in a project, read `~/.config/ai/projects/README.md`; if the current directory (or an ancestor) is listed, read its context file first.
+- Before using an unfamiliar API, read the relevant `knowledge/` file first; never guess signatures.
+- Always start from the `README.md` index and read only what you need — never load whole directories.
+- If a fact is missing, verify it once (build, test, or source), then append it back for future sessions.
 - Prefer running the actual build/test over reasoning about correctness.
 
 ## Incremental Delivery
