@@ -24,6 +24,8 @@
 
   # Global CLI packages managed declaratively via Home Manager
   home.packages = with pkgs; [
-    # Add other CLI packages here if desired
+    universal-ctags
+    ast-grep
+    ols
   ];
 }
