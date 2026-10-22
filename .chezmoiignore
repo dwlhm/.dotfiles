@@ -2,3 +2,4 @@ README.md
 LICENSE
 .DS_Store
 docs/**
+config/**

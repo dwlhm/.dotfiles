@@ -1,0 +1,137 @@
+// Zed settings
+//
+// For information on how to configure Zed, see the Zed
+// documentation: https://zed.dev/docs/configuring-zed
+//
+// To see all of Zed's default settings without changing your
+// custom settings, run `zed: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+{
+  "context_servers": {
+    "supernova-io": {
+      "enabled": false,
+      "url": "https://mcp.supernova.io/mcp"
+    }
+  },
+  "agent_servers": {
+    "antigravity-acp": {
+      "default_config_options": {
+        "thinking_level": "medium",
+        "mode": "auto_edit",
+        "model": "gemini-4-argon"
+      },
+      "type": "registry"
+    },
+    "gemini": {
+      "type": "registry"
+    }
+  },
+  "vim_mode": true,
+  "vim": {
+    "use_smartcase_find": true,
+    "toggle_relative_line_numbers": true
+  },
+  "edit_predictions": {
+    "zed": {
+      "prediction_debounce": 100
+    }
+  },
+  "project_panel": {
+    "dock": "right"
+  },
+  "outline_panel": {
+    "dock": "right"
+  },
+  "collaboration_panel": {
+    "dock": "right"
+  },
+  "agent": {
+    "default_profile": "ask",
+    "tool_permissions": {
+      "tools": {
+        "write_file": {
+          "default": "allow"
+        },
+        "fetch": {
+          "always_allow": [
+            {
+              "pattern": "^https?://developer\\.apple\\.com"
+            }
+          ]
+        },
+        "search_web": {
+          "default": "allow"
+        },
+        "skill": {
+          "default": "allow"
+        },
+        "terminal": {
+          "default": "allow",
+          "always_allow": [
+            {
+              "pattern": "^(cat|ls|find|head|tail)\\s+(~|/Users/dwlhm)/\\.config/ai(/|\\s|$)"
+            },
+            {
+              "pattern": "^cat\\s+package\\.json(\\s|$)"
+            },
+            {
+              "pattern": "^grep\\b"
+            },
+            {
+              "pattern": "^echo\\b"
+            },
+            {
+              "pattern": "^find\\s+\\.(\\s|$)"
+            },
+            {
+              "pattern": "^find\\s+src(\\s|$)"
+            },
+            {
+              "pattern": "^git\\b"
+            },
+            {
+              "pattern": "^sort\\b"
+            },
+            {
+              "pattern": "^head\\b"
+            },
+            {
+              "pattern": "^tail\\b"
+            },
+            {
+              "pattern": "^sed\\b"
+            },
+            {
+              "pattern": "^odin\\s+(test|build)(\\s|$)"
+            }
+          ]
+        }
+      }
+    },
+    "default_model": {
+      "provider": "opencode",
+      "model": "go/longcat-2.5-preview-free",
+      "enable_thinking": true
+    },
+    "sandbox_permissions": {
+      "allow_unsandboxed": true
+    },
+    "dock": "left",
+    "favorite_models": [],
+    "model_parameters": []
+  },
+  "git_panel": {
+    "dock": "right"
+  },
+  "session": {
+    "trust_all_worktrees": true
+  },
+  "icon_theme": "Catppuccin Mocha",
+  "ui_font_size": 16,
+  "buffer_font_size": 15,
+  "theme": {
+    "mode": "dark",
+    "light": "Gruvbox Light",
+    "dark": "Catppuccin Mocha"
+  }
+}
