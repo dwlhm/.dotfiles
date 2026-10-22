@@ -1,0 +1,170 @@
+#!/bin/zsh
+# Live symbol/line-range outline & project doc drift detector (sandbox-safe zsh + awk)
+set -euo pipefail
+
+AI_PROJECTS_DIR="${HOME}/.config/ai/projects"
+[[ ! -d "$AI_PROJECTS_DIR" && -d "${HOME}/.dotfiles/dot_config/ai/projects" ]] && \
+  AI_PROJECTS_DIR="${HOME}/.dotfiles/dot_config/ai/projects"
+
+outline_file() {
+  local file="$1"
+  local rel="$2"
+  /usr/bin/awk -v rel="$rel" '
+  BEGIN { count = 0 }
+  {
+    lines[NR] = $0
+    clean = $0
+    gsub(/\/\/.*/, "", clean)
+    gsub(/"([^"\\]|\\.)*"/, "\"\"", clean)
+    clean_lines[NR] = clean
+
+    if (match(clean, /^[[:space:]]*(@[A-Za-z0-9_]+(\([^)]*\))?[[:space:]]+)*(public[[:space:]]+|internal[[:space:]]+|private[[:space:]]+|fileprivate[[:space:]]+)?(struct|class|enum|protocol|actor|extension|func|init)[[:space:]]+[A-Za-z0-9_<>.:]+/)) {
+      hdr = substr(clean, RSTART, RLENGTH)
+      sub(/^[[:space:]]*(@[A-Za-z0-9_]+(\([^)]*\))?[[:space:]]+)*(public[[:space:]]+|internal[[:space:]]+|private[[:space:]]+|fileprivate[[:space:]]+)?/, "", hdr)
+      count++
+      sym_start[count] = NR
+      sym_label[count] = hdr
+      sym_isfn[count] = (hdr ~ /^(func|init)[[:space:]]/) ? 1 : 0
+    } else if (match(clean, /^[[:space:]]*[A-Za-z0-9_]+[[:space:]]*::[[:space:]]*(proc|struct|enum|union|bit_set)/)) {
+      hdr = substr(clean, RSTART, RLENGTH)
+      gsub(/^[[:space:]]+/, "", hdr)
+      split(hdr, parts, /[[:space:]]*::[[:space:]]*/)
+      count++
+      sym_start[count] = NR
+      sym_label[count] = parts[2] " " parts[1]
+      sym_isfn[count] = (parts[2] == "proc") ? 1 : 0
+    } else if (match(clean, /^[[:space:]]*var[[:space:]]+body[[:space:]]*:[[:space:]]*some[[:space:]]+View/)) {
+      count++
+      sym_start[count] = NR
+      sym_label[count] = "var body"
+      sym_isfn[count] = 1
+    }
+  }
+  END {
+    if (NR == 0) exit 0
+    fwarn = (NR > 250) ? " [WARN: FILE >250L]" : ""
+    printf "%s (%dL)%s\n", rel, NR, fwarn
+    for (i = 1; i <= count; i++) {
+      s = sym_start[i]
+      depth = 0; opened = 0; e = s
+      for (j = s; j <= NR; j++) {
+        line = clean_lines[j]
+        n = length(line)
+        for (k = 1; k <= n; k++) {
+          ch = substr(line, k, 1)
+          if (ch == "{") { depth++; opened = 1 }
+          else if (ch == "}") {
+            depth--
+            if (opened && depth <= 0) { e = j; break }
+          }
+        }
+        if (opened && depth <= 0) break
+      }
+      span = e - s + 1
+      fnwarn = (sym_isfn[i] && span > 40) ? " [WARN: >40L]" : ""
+      range = sprintf("L%d-L%d", s, e)
+      printf "  %-11s (%3dL) %s%s\n", range, span, sym_label[i], fnwarn
+    }
+  }
+  ' "$file"
+}
+
+check_doc_drift() {
+  local target_dir="$1"
+  local readme="${AI_PROJECTS_DIR}/README.md"
+  [[ ! -f "$readme" ]] && return 0
+
+  local abs_target="${target_dir:A}"
+  local matched_root="" matched_doc=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ '\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|' ]]; then
+      local raw_path="${match[1]}"
+      local doc_name="${match[2]}"
+      local expanded="${raw_path/#\~/$HOME}"
+      if [[ "$abs_target" == "$expanded" || "$abs_target" == "$expanded"/* ]]; then
+        matched_root="$expanded"
+        matched_doc="${AI_PROJECTS_DIR}/${doc_name}"
+        break
+      fi
+    fi
+  done < "$readme"
+
+  if [[ -z "$matched_doc" ]]; then
+    [[ "$CHECK_ONLY" -eq 1 ]] && echo "[DOC CHECK] ${abs_target} is not registered in ${readme}"
+    return 0
+  fi
+  if [[ ! -f "$matched_doc" ]]; then
+    echo "[STALE DOC] Missing doc file: ${matched_doc}"
+    return 1
+  fi
+
+  local drifts=()
+  local doc_content="$(<"$matched_doc")"
+
+  for mod_dir in "$matched_root"/Sources/*/Modules/*(N/); do
+    local mname="${mod_dir:t}"
+    [[ "$doc_content" != *"$mname"* ]] && drifts+=("Module '${mname}' missing in ${matched_doc:t}")
+  done
+
+  for ds_file in "$matched_root"/Sources/*/UI/DesignSystem/*.swift(N.); do
+    for comp in $(/usr/bin/awk '/struct[[:space:]]+Flat[A-Za-z0-9_]+/ { for(i=1;i<=NF;i++) if($i=="struct") { sub(/[^A-Za-z0-9_].*/, "", $(i+1)); print $(i+1) } }' "$ds_file"); do
+      [[ "$doc_content" != *"$comp"* ]] && drifts+=("DesignSystem component '${comp}' (${ds_file:t}) missing in ${matched_doc:t}")
+    done
+  done
+
+  for sub in "$matched_root"/src/core/*(N/) "$matched_root"/src/features/*(N/); do
+    local sname="${sub:t}"
+    [[ "$doc_content" != *"$sname"* ]] && drifts+=("Subpackage '${sub#$matched_root/}' missing in ${matched_doc:t}")
+  done
+
+  if [[ -f "$matched_root/Makefile" ]]; then
+    for tgt in $(/usr/bin/awk -F: '/^test-[a-z0-9_-]+[[:space:]]*:/ { gsub(/[[:space:]]/, "", $1); print $1 }' "$matched_root/Makefile"); do
+      [[ "$doc_content" != *"$tgt"* ]] && drifts+=("Makefile target '${tgt}' missing in ${matched_doc:t}")
+    done
+  fi
+
+  if (( ${#drifts[@]} > 0 )); then
+    echo "[STALE DOC] ${matched_doc:t} is out of sync with ${matched_root:t}:"
+    for d in "${drifts[@]}"; do
+      echo "  - $d"
+    done
+    echo "  -> Activate the 'context-sync' skill to update ~/.dotfiles/dot_config/ai/projects/ and run chezmoi apply."
+    return 1
+  fi
+
+  echo "[DOC OK] ${matched_doc:t} matches ${matched_root:t} structure ✓"
+  return 0
+}
+
+CHECK_ONLY=0
+PATHS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--check-doc" ]]; then
+    CHECK_ONLY=1
+  else
+    PATHS+=("$arg")
+  fi
+done
+(( ${#PATHS[@]} == 0 )) && PATHS=(".")
+
+EXIT_CODE=0
+for p in "${PATHS[@]}"; do
+  if [[ ! -e "$p" ]]; then
+    echo "Path not found: $p" >&2
+    exit 1
+  fi
+  base_dir="$p"
+  [[ -f "$p" ]] && base_dir="${p:h}"
+  check_doc_drift "$base_dir" || EXIT_CODE=1
+  [[ "$CHECK_ONLY" -eq 1 ]] && continue
+
+  if [[ -f "$p" ]]; then
+    outline_file "$p" "${p:t}"
+  else
+    for f in "$p"/**/*.(odin|swift|nix|ts|tsx|js|py|rs|c|h)(N.); do
+      [[ "$f" == *"/.git/"* || "$f" == *"/.build/"* || "$f" == *"/node_modules/"* || "$f" == *"/vendor/"* || "$f" == *"/bin/"* ]] && continue
+      outline_file "$f" "${f#$p/}"
+    done
+  fi
+done
+exit "$EXIT_CODE"
