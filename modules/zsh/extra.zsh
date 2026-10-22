@@ -1,5 +1,5 @@
 ### ✅ Basic Setup
-export PATH="/opt/homebrew/bin:$PATH"
+export PATH="/Users/dwlhm/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:$PATH"
 export LANG="en_US.UTF-8"
 
 ### 🚀 Zinit Init

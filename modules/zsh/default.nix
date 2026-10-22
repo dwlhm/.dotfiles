@@ -3,6 +3,7 @@
 {
   programs.zsh = {
     enable = true;
+    package = pkgs.emptyDirectory;
     enableCompletion = true;
     autocd = true;
 
@@ -36,13 +37,17 @@
 
     envExtra = ''
       [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+      if [[ ! -x /opt/homebrew/bin/python3 && -d /Library/Developer/CommandLineTools/usr/bin ]]; then
+        export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
+        export PATH="/Library/Developer/CommandLineTools/usr/bin:$PATH"
+      fi
     '';
 
     profileExtra = ''
       eval "$(/opt/homebrew/bin/brew shellenv)"
       [ -f ~/.orbstack/shell/init.zsh ] && source ~/.orbstack/shell/init.zsh 2>/dev/null || :
       export PATH="$PATH:/Users/dwlhm/Library/Application Support/JetBrains/Toolbox/scripts"
-      export PATH="/Users/dwlhm/.local/bin:$PATH"
+      export PATH="/Users/dwlhm/.local/bin:/Users/dwlhm/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
     '';
   };
 }
