@@ -3,3 +3,10 @@ LICENSE
 .DS_Store
 docs/**
 config/**
+flake.nix
+flake.lock
+home.nix
+modules/**
+secrets/**
+.sops.yaml
+templates/**

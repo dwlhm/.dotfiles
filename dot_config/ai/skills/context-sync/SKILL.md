@@ -1,16 +1,17 @@
 ---
 name: context-sync
 description: >-
-  Audits and synchronizes project context documentation in ~/.config/ai/projects/
-  and platform knowledge in ~/.config/ai/knowledge/ against the live repository
-  structure, Makefile/Package.swift targets, and DesignSystem symbols. Activate
-  this skill when [STALE DOC] is reported by ai-outline, after adding/renaming
-  modules or DesignSystem components, or when asked to check or update project docs.
+  Audits and synchronizes project context documentation in ~/brain/projects/
+  and platform knowledge in ~/brain/knowledge/ against the live repository
+  structure, Makefile/Package.swift targets, features, and DesignSystem symbols.
+  Activate automatically during Definition of Done when [STALE DOC] is reported
+  by ai-outline, after adding/renaming modules or components, or after discovering
+  verified technical facts / user architectural corrections.
 ---
 
-# Context Sync Skill (`context-sync`)
+# Context Sync & Self-Improvement Skill (`context-sync`)
 
-Keep `~/.config/ai/projects/<project>.md` and `~/.config/ai/knowledge/` 100% accurate and synchronized with the actual repository state via `~/.dotfiles`.
+Keep `~/brain/projects/<project>.md` and `~/brain/knowledge/<topic>.md` 100% accurate and continuously self-improving without waiting for user prompts.
 
 ## Steps
 
@@ -23,32 +24,34 @@ ai-outline --check-doc /path/to/project
 ```
 
 * If it outputs `[DOC OK]`, no structural drift was detected.
-* If it outputs `[STALE DOC]`, inspect the exact `Missing in doc` or `Stale in doc` items listed in the output.
+* If it outputs `[STALE DOC]`, inspect the exact missing/stale items listed in the output.
 
 ### 2. Inspect Live Symbols Without Full-File Reads
 
-To inspect symbols and exact line ranges in any changed module or `DesignSystem` folder:
+To inspect symbols and exact line ranges in any changed module, feature, or `DesignSystem` folder:
 
 ```bash
 ai-outline /path/to/project/module_or_file
 ```
 
-### 3. Update the Source of Truth in `~/.dotfiles`
+### 3. Direct Update & Self-Improvement in `~/brain`
 
-Never edit `~/.config/ai/` directly without updating its source in `~/.dotfiles/dot_config/ai/`:
+Edit `~/brain/projects/<project>.md` or `~/brain/knowledge/<topic>.md` directly (no `chezmoi apply` needed):
 
-1. Edit `/Users/dwlhm/.dotfiles/dot_config/ai/projects/<project>.md` (or `/Users/dwlhm/.dotfiles/dot_config/ai/knowledge/<topic>.md`).
-   * Keep entries compact, high-signal, and strictly factual (verified from build, test, or live source).
-   * If adding a new project or knowledge file, also register it in `/Users/dwlhm/.dotfiles/dot_config/ai/projects/README.md` or `knowledge/README.md`.
-2. Sync to `~/.config/ai/` using Chezmoi:
+1. **Project Context Sync (`~/brain/projects/<project>.md`)**:
+   * Update module lists, features, middleware, Makefile targets, DesignSystem components, or Core Invariants.
+   * If adding a new project, register it in `~/brain/projects/README.md`.
+2. **Autonomous Knowledge Distillation (`~/brain/knowledge/<topic>.md`)**:
+   * Whenever you solve a non-trivial root-cause bug, verify an undocumented platform/compiler/framework quirk, or receive an architectural/design correction from the user, immediately distill the verified fact into `~/brain/knowledge/<topic>.md` (and register new topics in `~/brain/knowledge/README.md`).
+   * Keep entries compact, high-signal, and strictly factual.
+
+### 4. Validate & Auto-Commit to `~/brain`
+
+1. Re-run the drift detector to confirm zero remaining discrepancies:
    ```bash
-   chezmoi apply --no-tty --force
+   ai-outline --check-doc /path/to/project
    ```
-
-### 4. Validate Synchronization
-
-Re-run the drift detector to confirm zero remaining discrepancies:
-
-```bash
-ai-outline --check-doc /path/to/project
-```
+2. Commit the updated knowledge directly inside the `~/brain` repository:
+   ```bash
+   git -C ~/brain add projects knowledge && git -C ~/brain commit -m "docs(brain): sync <scope>"
+   ```

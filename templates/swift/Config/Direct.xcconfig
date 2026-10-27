@@ -1,0 +1,10 @@
+// Direct distribution: Developer ID + notarization + Sparkle auto-update.
+#include "Base.xcconfig"
+
+CODE_SIGN_ENTITLEMENTS = Config/Direct.entitlements
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DISTRIBUTION_DIRECT
+
+// Sparkle: set both before the first public release (`just sparkle-keys` prints the public key).
+// The updater stays disabled while SPARKLE_PUBLIC_ED_KEY is empty.
+SPARKLE_FEED_URL =
+SPARKLE_PUBLIC_ED_KEY =

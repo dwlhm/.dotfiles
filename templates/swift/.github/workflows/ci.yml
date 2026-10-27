@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, Test & Universal Build
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Setup Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Select Xcode
+        run: |
+          XCODE_VER=$(tr -d '[:space:]' < .xcode-version)
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VER}.app" || sudo xcode-select -s "/Applications/Xcode.app"
+          xcodebuild -version
+
+      - name: Lint
+        run: nix develop -c just lint
+
+      - name: Test
+        run: nix develop -c just test
+
+      - name: Verify Universal Release Archives (Ad-hoc)
+        run: |
+          nix develop -c bash -c "
+            ADHOC=1 just archive direct && \
+            just verify-universal direct && \
+            ADHOC=1 just archive appstore && \
+            just verify-universal appstore && \
+            just verify-appstore
+          "

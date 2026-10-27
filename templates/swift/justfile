@@ -1,0 +1,128 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+app := "__APP_NAME__"
+build_dir := ".build"
+archives := build_dir / "archives"
+exports := build_dir / "export"
+release_dir := build_dir / "release"
+sparkle_bin := build_dir / "spm/artifacts/sparkle/Sparkle/bin"
+xcodebuild := "xcodebuild -project " + app + ".xcodeproj -derivedDataPath " + build_dir / "DerivedData" + " -clonedSourcePackagesDirPath " + build_dir / "spm"
+# Local/CI verification builds need no Apple account: ad-hoc sign.
+adhoc := "CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="
+# CI overrides: MARKETING_VERSION / CURRENT_PROJECT_VERSION and App Store Connect API key (ASC_*).
+version_args := '${MARKETING_VERSION:+MARKETING_VERSION=$MARKETING_VERSION} ${CURRENT_PROJECT_VERSION:+CURRENT_PROJECT_VERSION=$CURRENT_PROJECT_VERSION}'
+auth_args := '-allowProvisioningUpdates ${ASC_KEY_PATH:+-authenticationKeyPath $ASC_KEY_PATH -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID}'
+
+# List recipes
+default:
+    @just --list
+
+# Generate the Xcode project from project.yml
+generate:
+    xcodegen generate --quiet
+
+# Resolve Swift packages (Sparkle) into .build/spm
+resolve: generate
+    {{ xcodebuild }} -resolvePackageDependencies -quiet
+
+# Debug build of a channel (direct|appstore)
+build channel="direct": (_channel channel) generate
+    {{ xcodebuild }} -scheme {{ if channel == "appstore" { app + "-AppStore" } else { app } }} -configuration Debug -destination 'platform=macOS' {{ adhoc }} build | xcbeautify
+
+# Run unit tests
+test: generate
+    {{ xcodebuild }} -scheme {{ app }} -destination 'platform=macOS' {{ adhoc }} test | xcbeautify
+
+# Lint (swiftlint + swift-format bundled with the pinned Xcode)
+lint:
+    swiftlint lint --strict --quiet
+    xcrun swift-format lint --strict --recursive Sources Tests
+
+# Format sources in place
+format:
+    xcrun swift-format format --in-place --recursive Sources Tests
+    swiftlint lint --fix --quiet
+
+# Release archive of a channel (direct|appstore). ADHOC=1 skips Apple signing.
+archive channel: (_channel channel) generate
+    {{ xcodebuild }} -scheme {{ if channel == "appstore" { app + "-AppStore" } else { app } }} -configuration Release -destination 'generic/platform=macOS' \
+        -archivePath {{ archives }}/{{ channel }}.xcarchive {{ version_args }} {{ auth_args }} \
+        ${ADHOC:+{{ adhoc }}} archive | xcbeautify
+
+# Export an archive: direct → Developer ID app, appstore → upload to App Store Connect
+export channel: (_channel channel)
+    {{ xcodebuild }} -exportArchive -archivePath {{ archives }}/{{ channel }}.xcarchive \
+        -exportOptionsPlist Config/ExportOptions-{{ if channel == "appstore" { "AppStore" } else { "Direct" } }}.plist \
+        -exportPath {{ exports }}/{{ channel }} {{ auth_args }}
+
+# Assert the Release binary is Universal (arm64 + x86_64)
+verify-universal channel="direct": (_channel channel)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin="{{ archives }}/{{ channel }}.xcarchive/Products/Applications/{{ app }}.app/Contents/MacOS/{{ app }}"
+    archs="$(lipo -archs "$bin")"
+    [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "not universal: $archs" >&2; exit 1; }
+    echo "✓ universal: $archs"
+
+# Assert the App Store archive ships without Sparkle
+verify-appstore:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    app_dir="{{ archives }}/appstore.xcarchive/Products/Applications/{{ app }}.app"
+    [[ -d "$app_dir" ]] || { echo "missing $app_dir (run: just archive appstore)" >&2; exit 1; }
+    if find "$app_dir" -name 'Sparkle.framework' | grep -q .; then echo "Sparkle found in App Store build" >&2; exit 1; fi
+    echo "✓ App Store build is Sparkle-free"
+
+# Package the exported Direct app into a signed DMG
+dmg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    app_path="{{ exports }}/direct/{{ app }}.app"
+    version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
+    mkdir -p {{ release_dir }}
+    dmg="{{ release_dir }}/{{ app }}-$version.dmg"
+    rm -f "$dmg"
+    hdiutil create -volname "{{ app }}" -srcfolder "$app_path" -fs APFS -format ULFO -ov "$dmg"
+    identity="$(codesign -dvv "$app_path" 2>&1 | sed -n 's/^Authority=\(Developer ID Application.*\)/\1/p' | head -1)"
+    codesign --sign "$identity" --timestamp "$dmg"
+    echo "$dmg"
+
+# Notarize + staple every DMG in .build/release (keychain profile or ASC API key)
+notarize:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "${ASC_KEY_PATH:-}" ]]; then
+      auth=(--key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID")
+    else
+      auth=(--keychain-profile "${NOTARY_PROFILE:-notary}")
+    fi
+    for dmg in {{ release_dir }}/*.dmg; do
+      xcrun notarytool submit "$dmg" "${auth[@]}" --wait
+      xcrun stapler staple "$dmg"
+    done
+
+# Generate a signed Sparkle appcast.xml for .build/release (needs SPARKLE_DOWNLOAD_PREFIX)
+appcast: resolve
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${SPARKLE_DOWNLOAD_PREFIX:?set SPARKLE_DOWNLOAD_PREFIX (public URL prefix of the DMGs)}"
+    key=()
+    [[ -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]] && key=(--ed-key-file <(printf '%s' "$SPARKLE_ED_PRIVATE_KEY"))
+    {{ sparkle_bin }}/generate_appcast "${key[@]}" --download-url-prefix "$SPARKLE_DOWNLOAD_PREFIX" {{ release_dir }}
+
+# Create (or print) the Sparkle EdDSA key pair in the login keychain
+sparkle-keys: resolve
+    {{ sparkle_bin }}/generate_keys
+
+# Full Direct pipeline: archive → export → DMG → notarize → appcast
+release-direct: (archive "direct") (verify-universal "direct") (export "direct") dmg notarize appcast
+
+# Full App Store pipeline: archive → verify → upload
+release-appstore: (archive "appstore") (verify-universal "appstore") verify-appstore (export "appstore")
+
+# Remove generated project and build outputs
+clean:
+    rm -rf {{ build_dir }} {{ app }}.xcodeproj Generated
+
+_channel channel:
+    @[[ "{{ channel }}" == direct || "{{ channel }}" == appstore ]] || { echo "channel must be direct|appstore" >&2; exit 1; }

@@ -86,11 +86,6 @@ if [[ -z "$_GREETING_SHOWN" ]]; then
   _terminal_greeting
 fi
 
-### 🟢 fnm (Node.js manager) — harus di atas instant prompt
-if command -v fnm &>/dev/null; then
-  eval "$(fnm env --use-on-cd --shell zsh)"
-fi
-
 # Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
 # Initialization code that may require console input (password prompts, [y/n]
 # confirmations, etc.) must go above this block; everything else may go below.

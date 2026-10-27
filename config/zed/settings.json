@@ -69,7 +69,7 @@
           "default": "allow",
           "always_allow": [
             {
-              "pattern": "^(cat|ls|find|head|tail)\\s+(~|/Users/dwlhm)/\\.config/ai(/|\\s|$)"
+              "pattern": "^(cat|ls|find|head|tail)\\s+(~|/Users/dwlhm)/(brain|\\.config/ai)(/|\\s|$)"
             },
             {
               "pattern": "^cat\\s+package\\.json(\\s|$)"

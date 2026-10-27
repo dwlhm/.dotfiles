@@ -2,9 +2,8 @@
 # Live symbol/line-range outline & project doc drift detector (sandbox-safe zsh + awk)
 set -euo pipefail
 
-AI_PROJECTS_DIR="${HOME}/.config/ai/projects"
-[[ ! -d "$AI_PROJECTS_DIR" && -d "${HOME}/.dotfiles/dot_config/ai/projects" ]] && \
-  AI_PROJECTS_DIR="${HOME}/.dotfiles/dot_config/ai/projects"
+BRAIN_DIR="${BRAIN_DIR:-${HOME}/brain}"
+AI_PROJECTS_DIR="${BRAIN_DIR}/projects"
 
 outline_file() {
   local file="$1"
@@ -76,8 +75,10 @@ check_doc_drift() {
 
   local abs_target="${target_dir:A}"
   local matched_root="" matched_doc=""
+  local bquote='`'
+  local row_pat="\\|[[:space:]]*${bquote}([^${bquote}]+)${bquote}[[:space:]]*\\|[[:space:]]*${bquote}([^${bquote}]+)${bquote}[[:space:]]*\\|"
   while IFS= read -r line; do
-    if [[ "$line" =~ '\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|' ]]; then
+    if [[ "$line" =~ $row_pat ]]; then
       local raw_path="${match[1]}"
       local doc_name="${match[2]}"
       local expanded="${raw_path/#\~/$HOME}"
@@ -117,6 +118,16 @@ check_doc_drift() {
     [[ "$doc_content" != *"$sname"* ]] && drifts+=("Subpackage '${sub#$matched_root/}' missing in ${matched_doc:t}")
   done
 
+  for feat_dir in "$matched_root"/app/features/*(N/); do
+    local fname="${feat_dir:t}"
+    [[ "$doc_content" != *"$fname"* ]] && drifts+=("Feature '${fname}' missing in ${matched_doc:t}")
+  done
+
+  for mw_file in "$matched_root"/app/middleware/*.ts(N.); do
+    local mwname="${mw_file:t}"
+    [[ "$doc_content" != *"$mwname"* ]] && drifts+=("Middleware '${mwname}' missing in ${matched_doc:t}")
+  done
+
   if [[ -f "$matched_root/Makefile" ]]; then
     for tgt in $(/usr/bin/awk -F: '/^test-[a-z0-9_-]+[[:space:]]*:/ { gsub(/[[:space:]]/, "", $1); print $1 }' "$matched_root/Makefile"); do
       [[ "$doc_content" != *"$tgt"* ]] && drifts+=("Makefile target '${tgt}' missing in ${matched_doc:t}")
@@ -128,7 +139,7 @@ check_doc_drift() {
     for d in "${drifts[@]}"; do
       echo "  - $d"
     done
-    echo "  -> Activate the 'context-sync' skill to update ~/.dotfiles/dot_config/ai/projects/ and run chezmoi apply."
+    echo "  -> Update ~/brain/projects/${matched_doc:t} directly and commit to ~/brain."
     return 1
   fi
 

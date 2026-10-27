@@ -1,0 +1,24 @@
+included:
+  - Sources
+  - Tests
+
+# Formatting is owned by swift-format; swiftlint focuses on correctness and style smells.
+disabled_rules:
+  - trailing_comma
+  - opening_brace
+  - line_length
+
+opt_in_rules:
+  - empty_count
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - redundant_nil_coalescing
+  - sorted_first_last
+
+function_body_length:
+  warning: 40
+  error: 60
+file_length:
+  warning: 250
+  error: 400

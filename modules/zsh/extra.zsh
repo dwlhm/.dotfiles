@@ -1,5 +1,5 @@
 ### ✅ Basic Setup
-export PATH="/Users/dwlhm/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:$PATH"
+export PATH="/Users/dwlhm/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/Users/dwlhm/.local/bin:/opt/homebrew/bin:$PATH"
 export LANG="en_US.UTF-8"
 
 ### 🚀 Zinit Init
@@ -19,10 +19,8 @@ autoload -Uz _zinit
 zinit light zsh-users/zsh-autosuggestions
 zinit light zsh-users/zsh-syntax-highlighting
 zinit light Aloxaf/fzf-tab
-zinit light jeffreytse/zsh-vi-mode         # optional: Vim keybindings
-zinit light rupa/z                         # z (cd via history)
-zinit light wting/autojump                 # autojump support
-zinit light romkatv/powerlevel10k          # fancy prompt
+zinit light jeffreytse/zsh-vi-mode
+zinit light romkatv/powerlevel10k
 
 ### ⏱ Prompt Theme
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
@@ -32,36 +30,14 @@ zstyle ':completion:*' menu select
 zstyle ':fzf-tab:*' fzf-command fzf
 
 ### 🧠 Behavior
-setopt correct         # auto correct typo command
+setopt correct
 
-### 💥 Tools Init
-[ -f /opt/homebrew/etc/profile.d/autojump.sh ] && source /opt/homebrew/etc/profile.d/autojump.sh
-[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
-
-# pnpm
-export PNPM_HOME="/Users/dwlhm/Library/pnpm"
-case ":$PATH:" in
-  *":$PNPM_HOME:"*) ;;
-  *) export PATH="$PNPM_HOME:$PATH" ;;
-esac
-# pnpm end
-
-[ -f "/Users/dwlhm/.ghcup/env" ] && . "/Users/dwlhm/.ghcup/env" # ghcup-env
+### 💥 Tools Init (Thin Global Core)
+command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
+command -v fzf &>/dev/null && source <(fzf --zsh 2>/dev/null || true)
 
 # Antigravity CLI & IDE
-export PATH="/Users/dwlhm/.antigravity/antigravity/bin:$PATH"
-export PATH="/Users/dwlhm/.antigravity-ide/antigravity-ide/bin:$PATH"
-export PATH="/Users/dwlhm/.local/bin:$PATH"
-
-# Expose Android Development Toolbox from JetBrains Toolbox
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-export PATH="$JAVA_HOME/bin:$PATH"
-export ANDROID_HOME="$HOME/Library/Android/sdk"
-export PATH="$ANDROID_HOME/platform-tools:$PATH"
-
-export PATH="/Users/dwlhm/.nimble/bin:$PATH"
-
-[ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env"
+export PATH="/Users/dwlhm/.antigravity/antigravity/bin:/Users/dwlhm/.antigravity-ide/antigravity-ide/bin:$PATH"
 
 # Optional local overrides (not tracked in git)
 [[ -f ~/.zshrc.local ]] && source ~/.zshrc.local

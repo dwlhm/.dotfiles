@@ -1,0 +1,27 @@
+// Shared by every target. Single source of truth for identity, versioning and toolchain.
+PRODUCT_NAME = __APP_NAME__
+PRODUCT_BUNDLE_IDENTIFIER = __BUNDLE_ID__
+DEVELOPMENT_TEAM = __TEAM_ID__
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+MACOSX_DEPLOYMENT_TARGET = 14.0
+SWIFT_VERSION = 6.0
+SWIFT_STRICT_CONCURRENCY = complete
+SWIFT_TREAT_WARNINGS_AS_ERRORS = YES
+GCC_TREAT_WARNINGS_AS_ERRORS = YES
+
+// Archives sign with Apple Development; export re-signs per channel (ExportOptions-*.plist).
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+ENABLE_HARDENED_RUNTIME = YES
+ENABLE_USER_SCRIPT_SANDBOXING = YES
+DEAD_CODE_STRIPPING = YES
+
+// Universal binary for Release; Debug builds only the active arch (project preset).
+ARCHS = $(ARCHS_STANDARD)
+ONLY_ACTIVE_ARCH[config=Release] = NO
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.productivity

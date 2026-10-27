@@ -1,2 +1,5 @@
 # OS metadata
 .DS_Store
+
+# Template envrc must ship despite global ~/.config/git/ignore
+!templates/*/.envrc

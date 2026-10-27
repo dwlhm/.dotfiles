@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "lineLength": 120,
+  "indentation": { "spaces": 4 },
+  "indentConditionalCompilationBlocks": false,
+  "respectsExistingLineBreaks": true,
+  "lineBreakBeforeEachArgument": true,
+  "rules": {
+    "AllPublicDeclarationsHaveDocumentation": false,
+    "OrderedImports": true,
+    "UseLetInEveryBoundCaseVariable": true
+  }
+}

@@ -1,0 +1,68 @@
+name: __APP_NAME__
+
+options:
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
+
+targetTemplates:
+  App:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+
+targets:
+  __APP_NAME__:
+    templates: [App]
+    info:
+      path: Generated/Direct-Info.plist
+      properties:
+        SUFeedURL: $(SPARKLE_FEED_URL)
+        SUPublicEDKey: $(SPARKLE_PUBLIC_ED_KEY)
+    configFiles:
+      Debug: Config/Direct.xcconfig
+      Release: Config/Direct.xcconfig
+    dependencies:
+      - package: Sparkle
+
+  __APP_NAME__-AppStore:
+    templates: [App]
+    configFiles:
+      Debug: Config/AppStore.xcconfig
+      Release: Config/AppStore.xcconfig
+
+  __APP_NAME__Tests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+    configFiles:
+      Debug: Config/Tests.xcconfig
+      Release: Config/Tests.xcconfig
+    dependencies:
+      - target: __APP_NAME__
+
+schemes:
+  __APP_NAME__:
+    build:
+      targets:
+        __APP_NAME__: all
+    test:
+      targets:
+        - __APP_NAME__Tests
+    archive:
+      config: Release
+
+  __APP_NAME__-AppStore:
+    build:
+      targets:
+        __APP_NAME__-AppStore: all
+    archive:
+      config: Release
