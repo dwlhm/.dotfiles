@@ -30,8 +30,6 @@ let
           email = ${config.sops.placeholder."git/${id}/email"}
         [core]
           sshCommand = ssh -i ~/.ssh/keys/${id} -o IdentitiesOnly=yes
-        [auth]
-          token = ${config.sops.placeholder."git/${id}/token"}
       '';
     };
   };
@@ -45,7 +43,7 @@ let
       path = ~/.config/git/identities/id-${id}.inc
     [includeIf "hasconfig:remote.*.url:git@${config.sops.placeholder."git/${id}/host"}:${config.sops.placeholder."git/${id}/org"}/**"]
       path = ~/.config/git/identities/id-${id}.inc
-    [includeIf "hasconfig:remote.*.url:git@${config.sops.placeholder."git/${id}/host"}-${id}:/**"]
+    [includeIf "hasconfig:remote.*.url:git@${config.sops.placeholder."git/${id}/host"}-${id}:*/**"]
       path = ~/.config/git/identities/id-${id}.inc
     [includeIf "hasconfig:remote.*.url:git@${config.sops.placeholder."git/${id}/host"}-${id}:${config.sops.placeholder."git/${id}/org"}/**"]
       path = ~/.config/git/identities/id-${id}.inc

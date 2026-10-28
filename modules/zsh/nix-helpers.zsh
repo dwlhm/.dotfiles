@@ -3,6 +3,7 @@
 _NIX_DOTFILES="${HOME}/.dotfiles"
 _NIX_BINDINGS_FILE="${HOME}/.local/state/nix-envs/bindings.tsv"
 _NIX_SOPS_KEY="${HOME}/.config/sops/age/keys.txt"
+_NIX_SOPS_SECRETS="${HOME}/.config/sops-nix/secrets"
 
 _nix_apply_identity_session() {
   local id="$1"
@@ -15,25 +16,36 @@ _nix_apply_identity_session() {
   [[ -n "$email" ]] && export GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_EMAIL="$email"
   export GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/keys/${id} -o IdentitiesOnly=yes"
   export NIX_ACTIVE_ID="$id"
-  local token
-  token=$(git config -f "$inc" auth.token 2>/dev/null || true)
-  if [[ -n "$token" ]]; then
-    export GH_TOKEN="$token"
+  local token_file="${_NIX_SOPS_SECRETS}/git/${id}/token"
+  if [[ -s "$token_file" ]]; then
+    export GH_TOKEN="$(<"$token_file")"
   else
     unset GH_TOKEN
   fi
 }
 
+_nix_clear_identity_session() {
+  unset NIX_ACTIVE_ID GIT_AUTHOR_NAME GIT_COMMITTER_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL GIT_SSH_COMMAND GH_TOKEN
+}
+
+_nix_deactivate_stack() {
+  [[ -n "${_NIX_BASE_PATH:-}" ]] && export PATH="$_NIX_BASE_PATH"
+  unset NIX_ACTIVE_STACK _NIX_SESSION_STACK JAVA_HOME ANDROID_HOME ANDROID_SDK_ROOT
+  _nix_clear_identity_session
+}
+
 _nix_activate_stack_in_memory() {
+  setopt localoptions pipefail
   local stack="${1#\#}"
   [[ -z "${_NIX_BASE_PATH:-}" ]] && export _NIX_BASE_PATH="$PATH"
   local cache_dir="${HOME}/.cache/nix-envs/env-scripts"
   command mkdir -p "$cache_dir"
   local cache_file="${cache_dir}/${stack}.sh"
   local lock_mtime
-  lock_mtime=$(/usr/bin/stat -f%m "${_NIX_DOTFILES}/flake.lock" "${_NIX_DOTFILES}/modules/devshells.nix" 2>/dev/null | /usr/bin/sort -n | /usr/bin/tail -1)
+  lock_mtime=$(/usr/bin/stat -f%m "${_NIX_DOTFILES}/flake.nix" "${_NIX_DOTFILES}/flake.lock" "${_NIX_DOTFILES}/modules/devshells.nix" 2>/dev/null | /usr/bin/sort -n | /usr/bin/tail -1)
   local cache_mtime
   cache_mtime=$(/usr/bin/stat -f%m "$cache_file" 2>/dev/null || echo 0)
+
   if (( cache_mtime < lock_mtime )) || [[ ! -s "$cache_file" ]]; then
     echo "❄ Building environment #${stack}..."
     command nix print-dev-env --json "${_NIX_DOTFILES}#${stack}" | /usr/bin/jq -r '
@@ -43,7 +55,8 @@ _nix_activate_stack_in_memory() {
   fi
   export PATH="$_NIX_BASE_PATH"
   source "$cache_file"
-  export NIX_ACTIVE_STACK="$stack"
+  # _NIX_SESSION_STACK marks helper ownership; direnv devshells also export NIX_ACTIVE_STACK.
+  export NIX_ACTIVE_STACK="$stack" _NIX_SESSION_STACK="$stack"
 }
 
 _nix_save_dir_binding() {
@@ -54,27 +67,27 @@ _nix_save_dir_binding() {
 }
 
 _nix_cmd_change() {
-  local target="${1:-list}" as_id=""
-  (( $# > 0 )) && shift
-  while (( $# > 0 )); do
-    [[ "$1" == "--as" && -n "${2:-}" ]] && { as_id="$2"; shift 2; continue; }
-    shift
-  done
+  local -a o_as
+  zparseopts -D -E -F -- -as:=o_as || return 1
+  local target="${1:-list}" as_id="${o_as[-1]:-}"
   case "$target" in
     list|--list)
       echo "Available stacks: #web #bun #node20 #node16 #odin #swift #android #python"
       [[ -n "${NIX_ACTIVE_STACK:-}" ]] && echo "Active stack    : #${NIX_ACTIVE_STACK} (identity: ${NIX_ACTIVE_ID:-auto})"
       ;;
     off|none|reset)
-      [[ -n "${_NIX_BASE_PATH:-}" ]] && export PATH="$_NIX_BASE_PATH"
-      unset NIX_ACTIVE_STACK NIX_ACTIVE_ID GIT_AUTHOR_NAME GIT_COMMITTER_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL GIT_SSH_COMMAND JAVA_HOME ANDROID_HOME ANDROID_SDK_ROOT GH_TOKEN
+      _nix_deactivate_stack
       _nix_save_dir_binding "$PWD" "" ""
       echo "❄ Switched back to Thin Global Core"
       ;;
     *)
       local stack="${target#\#}"
       _nix_activate_stack_in_memory "$stack" || return 1
-      [[ -n "$as_id" ]] && _nix_apply_identity_session "$as_id"
+      if [[ -n "$as_id" ]]; then
+        _nix_apply_identity_session "$as_id" || return 1
+      else
+        _nix_clear_identity_session
+      fi
       _nix_save_dir_binding "$PWD" "$stack" "$as_id"
       echo "❄ Active stack: #${stack}${as_id:+ (as $as_id)}"
       ;;
@@ -100,16 +113,10 @@ _nix_scaffold_template() {
 
 # Stacks with a flake template get a self-contained project; others bind .envrc to the dotfiles devShell.
 _nix_cmd_init() {
-  local stack="" as_id="" name="${PWD:t}" bundle_id="" team="" mode="envrc"
-  while (( $# > 0 )); do
-    case "$1" in
-      --as) as_id="${2:-}"; shift 2 ;;
-      --name) name="${2:-}"; shift 2 ;;
-      --bundle-id) bundle_id="${2:-}"; shift 2 ;;
-      --team) team="${2:-}"; shift 2 ;;
-      *) stack="${1#\#}"; shift ;;
-    esac
-  done
+  local -a o_as o_name o_bundle o_team
+  zparseopts -D -E -F -- -as:=o_as -name:=o_name -bundle-id:=o_bundle -team:=o_team || return 1
+  local stack="${1#\#}" as_id="${o_as[-1]:-}" name="${o_name[-1]:-${PWD:t}}"
+  local bundle_id="${o_bundle[-1]:-}" team="${o_team[-1]:-}" mode="envrc"
   [[ -z "$stack" ]] && { echo "Usage: nix init #<stack> [--as <id>] [--name <App> --bundle-id <id> [--team <ID>]]" >&2; return 1; }
   [[ -d .git ]] || command git init
   if _nix_has_template "$stack"; then
@@ -123,9 +130,28 @@ _nix_cmd_init() {
   echo "❄ Initialized #${stack} (${mode}) | Git: $(git config user.name 2>/dev/null || echo unbound) <$(git config user.email 2>/dev/null || echo unbound)>"
 }
 
+# Values travel via stdin so secrets never appear in process listings.
+_nix_sops_set() {
+  SOPS_AGE_KEY_FILE="${_NIX_SOPS_KEY}" sops set --value-stdin "${_NIX_DOTFILES}/secrets/secrets.yaml" "$1"
+}
+
+# accounts.json is only updated after both secrets are stored, so a failure never registers a half-written id.
+_nix_id_register() {
+  setopt localoptions pipefail
+  local id="$1" key="$2" name="$3" email="$4" host="$5" org="$6" dir="$7" token="$8"
+  local accounts="${_NIX_DOTFILES}/secrets/accounts.json"
+  /usr/bin/ssh-keygen -q -t ed25519 -C "$email" -f "$key" -N "" || return 1
+  jq -Rs . < "$key" | _nix_sops_set "[\"ssh_keys\"][\"${id}\"]" || return 1
+  jq -n --arg name "$name" --arg email "$email" --arg host "$host" --arg org "$org" --arg dir "$dir" --arg token "$token" \
+    '{$name, $email, $host, $org, $dir, $token}' | _nix_sops_set "[\"git\"][\"${id}\"]" || return 1
+  jq --arg id "$id" 'if index($id) then . else . + [$id] end' "$accounts" > "${accounts}.tmp" \
+    && command mv "${accounts}.tmp" "$accounts" || return 1
+  /usr/bin/pbcopy < "${key}.pub"
+}
+
 _nix_cmd_id_add() {
   local id="${1:-}"
-  [[ -z "$id" ]] && { echo "Usage: nix id add <id>" >&2; return 1; }
+  [[ "$id" =~ '^[A-Za-z0-9_-]+$' ]] || { echo "Usage: nix id add <id> (letters, digits, '-' or '_')" >&2; return 1; }
   local name email host org dir token
   vared -p "Git user.name          : " name
   vared -p "Git user.email         : " email
@@ -133,24 +159,14 @@ _nix_cmd_id_add() {
   org="$name"; vared -p "Git org/user           : " org
   dir="~/project/${id}"; vared -p "Workspace dir          : " dir
   vared -p "Auth token/PAT (opt)   : " token
-  local tmp_key
-  tmp_key=$(/usr/bin/mktemp -u "${TMPDIR:-/tmp}/nix-id-${id}.XXXXXX")
-  /usr/bin/ssh-keygen -t ed25519 -C "$email" -f "$tmp_key" -N "" >/dev/null
-  local key_json name_json email_json host_json org_json dir_json token_json
-  key_json=$(jq -Rs . < "$tmp_key")
-  name_json=$(jq -Rn --arg v "$name" '$v')
-  email_json=$(jq -Rn --arg v "$email" '$v')
-  host_json=$(jq -Rn --arg v "$host" '$v')
-  org_json=$(jq -Rn --arg v "$org" '$v')
-  dir_json=$(jq -Rn --arg v "$dir" '$v')
-  token_json=$(jq -Rn --arg v "$token" '$v')
-  local sops_file="${_NIX_DOTFILES}/secrets/secrets.yaml"
-  SOPS_AGE_KEY_FILE="${_NIX_SOPS_KEY}" sops --set "[\"ssh_keys\"][\"${id}\"] ${key_json}" "$sops_file"
-  SOPS_AGE_KEY_FILE="${_NIX_SOPS_KEY}" sops --set "[\"git\"][\"${id}\"] {\"name\":${name_json},\"email\":${email_json},\"host\":${host_json},\"org\":${org_json},\"dir\":${dir_json},\"token\":${token_json}}" "$sops_file"
-  jq --arg id "$id" 'if index($id) then . else . + [$id] end' "${_NIX_DOTFILES}/secrets/accounts.json" > "${_NIX_DOTFILES}/secrets/accounts.json.tmp"
-  command mv "${_NIX_DOTFILES}/secrets/accounts.json.tmp" "${_NIX_DOTFILES}/secrets/accounts.json"
-  /usr/bin/pbcopy < "${tmp_key}.pub"
-  command rm -f "$tmp_key" "${tmp_key}.pub"
+  local tmp_dir
+  tmp_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/nix-id-${id}.XXXXXX") || return 1
+  {
+    _nix_id_register "$id" "${tmp_dir}/key" "$name" "$email" "$host" "$org" "$dir" "$token" \
+      || { echo "nix id add: failed to register '$id'; accounts.json left unchanged" >&2; return 1; }
+  } always {
+    command rm -rf "$tmp_dir"
+  }
   echo "🔑 Public key copied to clipboard! Running nix sync..."
   _nix_cmd_sync
 }
@@ -176,7 +192,9 @@ _nix_cmd_id() {
 }
 
 _nix_cmd_sync() {
-  command git -C "$_NIX_DOTFILES" add -N . 2>/dev/null || true
+  local untracked
+  untracked=$(command git -C "$_NIX_DOTFILES" ls-files --others --exclude-standard)
+  [[ -n "$untracked" ]] && printf 'nix sync: untracked files are invisible to the flake (git add them explicitly):\n%s\n' "$untracked" >&2
   command home-manager switch -b backup --flake "$_NIX_DOTFILES"
 }
 
@@ -207,16 +225,23 @@ nix() {
 alias nix='noglob nix'
 
 _nix_chpwd_binding_hook() {
-  [[ -f "$_NIX_BINDINGS_FILE" ]] || return 0
-  local match_stack="" match_id=""
-  while IFS=$'\t' read -r bdir bstack bid; do
-    if [[ "$PWD" == "$bdir" || "$PWD" == "$bdir"/* ]]; then
-      match_stack="$bstack"; match_id="$bid"
-    fi
-  done < "$_NIX_BINDINGS_FILE"
-  if [[ -n "$match_stack" && "${NIX_ACTIVE_STACK:-}" != "$match_stack" ]]; then
-    _nix_activate_stack_in_memory "$match_stack" >/dev/null
-    [[ -n "$match_id" ]] && _nix_apply_identity_session "$match_id"
+  local bdir bstack bid match_dir="" match_stack="" match_id=""
+  if [[ -f "$_NIX_BINDINGS_FILE" ]]; then
+    # Longest matching prefix wins so nested project bindings override their parents.
+    while IFS=$'\t' read -r bdir bstack bid; do
+      [[ "$PWD" == "$bdir" || "$PWD" == "$bdir"/* ]] && (( ${#bdir} > ${#match_dir} )) || continue
+      match_dir="$bdir" match_stack="$bstack" match_id="$bid"
+    done < "$_NIX_BINDINGS_FILE"
+  fi
+  if [[ -z "$match_stack" ]]; then
+    [[ -n "${_NIX_SESSION_STACK:-}${NIX_ACTIVE_ID:-}" ]] && _nix_deactivate_stack
+    return 0
+  fi
+  if [[ "${NIX_ACTIVE_STACK:-}" != "$match_stack" ]]; then
+    _nix_activate_stack_in_memory "$match_stack" >/dev/null || return 1
+  fi
+  if [[ "${NIX_ACTIVE_ID:-}" != "$match_id" ]]; then
+    if [[ -n "$match_id" ]]; then _nix_apply_identity_session "$match_id"; else _nix_clear_identity_session; fi
   fi
 }
 autoload -Uz add-zsh-hook

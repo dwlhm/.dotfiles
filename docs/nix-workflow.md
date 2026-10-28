@@ -135,7 +135,7 @@ Langkah otomatis yang dilakukan:
   ```bash
   nix sync
   ```
-  Menjalankan `home-manager switch -b backup --flake ~/.dotfiles`. Otomatis melakukan `git add -N .` pada file-file baru di dotfiles agar Nix Flake dapat membaca seluruh file.
+  Menjalankan `home-manager switch -b backup --flake ~/.dotfiles`. Nix Flake hanya membaca file yang di-track git; file baru harus di-`git add` secara eksplisit (sync menampilkan peringatan untuk file untracked agar file liar seperti secret hasil dekripsi tidak ikut tersalin ke `/nix/store`).
 
 ---
 
