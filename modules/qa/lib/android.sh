@@ -121,7 +121,9 @@ qa_android() {
     esac
   done
   case "$cmd" in
-    run) qa_android_run ;;
+    # A run keeps its own session file: reusing an `up` device must not take over (and then
+    # delete) that session, which would orphan the emulator `up` started.
+    run) QA_ADB_SESSION="$QA_DIR/android-session.run.$$"; qa_android_run ;;
     up) qa_android_up ;;
     down) qa_android_down ;;
     hierarchy | screenshot) qa_android_inspect "$cmd" ;;
