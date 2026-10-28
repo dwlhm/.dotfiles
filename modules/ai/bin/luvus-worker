@@ -1,0 +1,86 @@
+#!/bin/sh
+# Luvus task worker with provider fallback: `luvus task start <id> --agent "luvus-worker <tier>"`
+# appends the task briefing as the last argument. Each provider in the tier's chain runs headless
+# with edits allowed and no network: OpenCode may run only `luvus task *` and the task's gate;
+# agy is edit-only (luvus-agy-guard). A provider that stops before done/review is an infra failure:
+# the next provider continues from the working tree. When every provider fails the task is
+# marked blocked so the lead takes over. Quality failures (gate → review) are the lead's call.
+set -eu
+
+: "${LUVUS_TASK_ID:?luvus-worker must be launched by luvus task start}"
+[ "$#" -eq 2 ] || { echo "usage: luvus-worker small|medium <briefing>" >&2; exit 64; }
+
+case "$1" in
+  small) CHAIN="oc:opencode/deepseek-v4.1-flash-free oc:opencode/beam-free agy:gemini-3.8-flash-low" ;;
+  medium) CHAIN="agy:gemini-3.8-flash-medium oc:opencode/deepseek-v4.1-flash-free agy:gemini-4-argon-medium" ;;
+  *) echo "luvus-worker: unknown tier '$1' (small|medium)" >&2; exit 64 ;;
+esac
+CHAIN="${LUVUS_WORKER_CHAIN:-$CHAIN}"
+LIMIT="${LUVUS_WORKER_TIMEOUT:-1500}"
+BRIEF="$2"
+L="${LUVUS_BIN_PATH:-luvus}"
+
+task_field() { "$L" task get "$LUVUS_TASK_ID" | jq -r ".result.task.$1 // empty"; }
+
+LUVUS_WORKER=1
+LUVUS_WORKER_GATE="$(task_field gate)"
+export LUVUS_WORKER LUVUS_WORKER_GATE
+
+# perl's alarm survives exec, so a hung provider is killed with SIGALRM (exit 142).
+with_limit() { perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$LIMIT" "$@"; }
+
+run_oc() {
+  OPENCODE_CONFIG_CONTENT=$(jq -nc --arg m "$1" --arg g "$LUVUS_WORKER_GATE" '{model: $m,
+    permission: {edit: "allow", webfetch: "deny", execute: "deny",
+      bash: ({"*": "deny", "luvus task *": "allow"} + (if $g == "" then {} else {($g): "allow"} end))}}')
+  export OPENCODE_CONFIG_CONTENT
+  with_limit opencode run --standalone --auto --title "$LUVUS_TASK_ID" "$2"
+}
+
+# agy runs edit-only (luvus-agy-guard denies shell/network); finish() reports completion.
+# agy exits 0 even after a headless permission abort or print timeout: treat those as infra failures.
+run_agy() {
+  { with_limit agy -p "$2
+
+You cannot run shell commands. Only read and edit files; when the edits are complete, stop." \
+    --mode accept-edits --model "$1" --print-timeout "${LIMIT}s"; echo $? >"$LOG.agy.rc"; } | tee "$LOG.agy"
+  [ "$(cat "$LOG.agy.rc")" = 0 ] || return "$(cat "$LOG.agy.rc")"
+  ! grep -q -e '^jetski:' -e '^\[agy\] print timeout' "$LOG.agy"
+}
+
+# Report completion unless the agent already did, then wait for the gate: Luvus runs it
+# asynchronously and keeps the task `running` until it settles (a repeat `task done` while it
+# runs answers `gate_running`). Succeeds once the task reaches done/review.
+finish() {
+  case "$(task_field status)" in done | review | merging | merged) return 0 ;; esac
+  code=$("$L" task done "$LUVUS_TASK_ID" | jq -r '.error.code // empty')
+  [ -z "$code" ] || [ "$code" = gate_running ] || return 1
+  waited=0
+  while [ "$(task_field status)" = running ] && [ "$waited" -lt "$LIMIT" ]; do
+    sleep 2; waited=$((waited + 2))
+  done
+  case "$(task_field status)" in done | review | merging | merged) return 0 ;; *) return 1 ;; esac
+}
+
+# Task notes reject control characters, so strip ANSI escapes and newlines from provider output.
+tail_plain() { tail -c 600 "$LOG" | perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g; s/[\x00-\x1f\x7f]+/ /g' | tail -c 300; }
+
+LOG=$(mktemp)
+trap 'rm -f "$LOG" "$LOG.rc" "$LOG.agy" "$LOG.agy.rc"' EXIT
+prompt="$BRIEF"
+for step in $CHAIN; do
+  provider="${step%%:*}" model="${step#*:}"
+  echo "── luvus-worker: $step ──"
+  { set +e; "run_$provider" "$model" "$prompt"; echo $? >"$LOG.rc"; } 2>&1 | tee "$LOG"
+  [ "$(cat "$LOG.rc")" = 0 ] && finish && exit 0
+  case "$(task_field status)" in done | review | merging | merged) exit 0 ;; esac
+  "$L" task update "$LUVUS_TASK_ID" \
+    --note "provider $step failed (exit $(cat "$LOG.rc")): $(tail_plain)" >/dev/null
+  prompt="$BRIEF
+
+NOTE: a previous worker ($step) stopped before finishing this task. Inspect the working tree,
+keep or fix its partial changes, and complete the task."
+done
+
+"$L" task update "$LUVUS_TASK_ID" --status blocked --note "ALL PROVIDERS FAILED: $CHAIN" >/dev/null
+exit 1

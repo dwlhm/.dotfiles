@@ -67,6 +67,7 @@ in
     ./modules/tmux
     ./modules/zed
     ./modules/ai
+    ./modules/luvus
   ];
 
   home.username = "dwlhm";

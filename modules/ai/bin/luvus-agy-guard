@@ -1,0 +1,24 @@
+#!/bin/sh
+# Antigravity PreToolUse hook (registered in ~/.gemini/config/hooks.json as "luvus-worker").
+# Inert unless launched by luvus-worker (LUVUS_WORKER=1): then it allows local read/edit tools
+# and denies everything else — shell, network, browser, MCP, subagents. Headless agy cannot
+# approve commands outside its built-in safe list (a hook "allow" does not grant them, and an
+# unapproved command aborts the whole run), so shell is denied here with a reason the model can
+# act on; luvus-worker reports completion and Luvus runs the gate.
+set -eu
+
+input=$(cat)
+[ "${LUVUS_WORKER:-}" = 1 ] || { echo '{}'; exit 0; }
+
+name=$(printf '%s' "$input" | jq -r '.toolCall.name // empty')
+
+case "$name" in
+  *url* | *web* | *browser* | mcp* | *subagent* | schedule | generate_image | send_command_input) ;;
+  view_* | read_* | list_* | grep_search | find_by_name | search_in_file | write_* | *replace* | *edit* | \
+    command_status | task_boundary | finish | wait* | notify_user | trajectory_search)
+    echo '{"decision":"allow"}'; exit 0 ;;
+  run_command)
+    jq -nc '{decision: "deny", reason: "luvus worker policy: shell is unavailable. Only read and edit files; when the edits are complete, stop. Completion and the quality gate are run for you."}'
+    exit 0 ;;
+esac
+jq -nc --arg n "$name" '{decision: "deny", reason: "luvus worker policy: tool \($n) is not allowed for task workers"}'

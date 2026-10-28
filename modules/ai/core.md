@@ -85,12 +85,18 @@ Before declaring a task complete:
 - Treat `~/brain/{projects,knowledge}` as your living long-term memory: update it autonomously in-place so every session compounds engineering accuracy.
 - Guard the context budget: avoid pasting large files or logs; delegate independent research/sub-tasks to sub-agents when appropriate, or recommend a fresh session if the context window is saturated.
 
-## Multi-Agent Orchestration (Luvus)
+## Multi-Agent Orchestration (Luvus ORCH Board)
 
-- When the user asks to run several agents inside Luvus (`LUVUS_ENV=1`), use its task engine, never hand-split panes or `pane run` TUIs: `luvus task add "<title>" --prompt-file <f> --paths <globs> --gate "<check cmd>"`, then `luvus task start <id> --agent luvus-oc-worker --mode workspace|worktree --no-focus`.
-- Lead first, workers second: write the spec, design tokens, and shared contracts yourself before starting workers; give each worker small, disjoint files so the slow free model finishes in minutes, not tens of minutes.
-- Wait event-driven on `luvus events` (task status/notes), never sleep-poll. A failed gate lands the task in `review` with its output: fix the brief and `luvus task retry`, or finish it yourself.
-- Never trust worker self-reports: re-run the gate and review the diff before accepting. Details: `~/brain/knowledge/luvus-opencode.md`.
+The user only watches the ORCH board (`Ctrl+Space o`); you (Claude) are the `lead` and own triage, routing, verification, and merge. Details: `~/brain/knowledge/luvus-opencode.md`.
+
+- **Lead loop**: when asked to "jadi lead", run `luvus agent name lead` and watch `luvus events` in a Monitor filtered with `jq` to `task.*` events whose status is `queued` with no assignee, or that changed to `done`/`review`/`blocked`. Never sleep-poll.
+- **Triage a user task**: `luvus task claim <id>` (it becomes the parent), research, then split it into subtasks with `luvus task add "<id>› <title>" --prompt-file <f> --paths <disjoint globs> --gate "<project check cmd>" [--dep <sub>]`. Write shared contracts/specs yourself first. Briefs must be short and precise, with narrow `--paths` and a mandatory gate.
+- **Route by cost** (cheapest first): `--agent "luvus-worker small"` for small edits to one file, docs, or boilerplate; `--agent "luvus-worker medium"` for multi-file work or medium features. Workers have no free shell: the gate is the test, so every task needs a gate that proves its outcome. Start every task with `luvus task start <id> --no-focus` (`--mode worktree` by default; `--mode workspace` only for uncommitted/untracked inputs). Don't do implementation yourself unless every tier has failed.
+- **Two failure classes**: infra failures (quota, auth, crash, hang) are handled by `luvus-worker`'s provider fallback chain without waking you; when the whole chain fails it marks the task `blocked` with `ALL PROVIDERS FAILED`. Quality failures (gate → `review`): fix the brief and `luvus task retry` (max 2 per tier), then escalate `small`→`medium`→ you finish it yourself.
+- **Verify, never trust self-reports**: re-run the gate, then read the bounded diff (`luvus diff get <path>`). For corrections use `luvus diff note add` + `luvus diff note send --to <worker>` or `task retry`. If it passes, `luvus task merge <id>` into `luvus/integration` automatically.
+- **Close the parent** after all subtasks are merged: verify end-to-end, add a short summary with `task update --note`, then `task done`. Merging `luvus/integration` into `main` only happens on the user's command.
+- **Escalate to the user** only for a *what/why* decision: `task update <id> --status blocked --note "QUESTION: …"` + `luvus ui notification push --level warning --text "…"`; the user answers in the `lead` pane.
+- **Board hygiene**: record every progress step with `task update --note`; never leave a task `running` without a live worker.
 
 ## Git & Commits
 

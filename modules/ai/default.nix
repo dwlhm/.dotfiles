@@ -94,8 +94,12 @@ in
       source = ./skills/context-sync/scripts/ai-outline;
       executable = true;
     };
-    ".local/bin/luvus-oc-worker" = {
-      source = ./bin/luvus-oc-worker;
+    ".local/bin/luvus-worker" = {
+      source = ./bin/luvus-worker;
+      executable = true;
+    };
+    ".local/bin/luvus-agy-guard" = {
+      source = ./bin/luvus-agy-guard;
       executable = true;
     };
     ".claude/CLAUDE.md".text = claudePrompt;
@@ -112,6 +116,20 @@ in
   home.activation.luvusSkill = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     if [ -x "${homeDir}/.local/bin/luvus" ]; then
       run "${homeDir}/.local/bin/luvus" skill enable >/dev/null
+    fi
+  '';
+
+  # 4. Register luvus-agy-guard as Antigravity's "luvus-worker" PreToolUse hook. hooks.json is
+  #    shared with Luvus's own integration hook, so merge our key instead of owning the file.
+  home.activation.agyWorkerGuard = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    agyConfig="${homeDir}/.gemini/config"
+    if [ -d "$agyConfig" ]; then
+      hooks="$agyConfig/hooks.json" merged=$(mktemp)
+      { [ -s "$hooks" ] && cat "$hooks" || echo '{}'; } | ${pkgs.jq}/bin/jq \
+        --arg c "${homeDir}/.local/bin/luvus-agy-guard" \
+        '. + {"luvus-worker": {PreToolUse: [{matcher: "*", hooks: [{command: $c, timeout: 10}]}]}}' > "$merged"
+      run cp "$merged" "$hooks"
+      rm -f "$merged"
     fi
   '';
 }
