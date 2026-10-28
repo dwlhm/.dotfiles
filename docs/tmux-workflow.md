@@ -6,12 +6,12 @@ Panduan workflow terminal modern yang memadukan **Ghostty**, **Tmux**, **Neovim*
 
 ## 1. Instalasi & Penerapan
 
-### A. Terapkan Konfigurasi via Chezmoi
-File konfigurasi disimpan sebagai `dot_tmux.conf` di dotfiles antum. Terapkan ke sistem:
+### A. Terapkan Konfigurasi via Nix
+File konfigurasi dikelola secara deklaratif di `modules/tmux/` pada dotfiles antum. Terapkan ke sistem:
 
 ```bash
-chezmoi diff
-chezmoi apply
+nix sync
+# atau: home-manager switch -b backup --flake ~/.dotfiles
 ```
 
 Jika Tmux sudah berjalan, muat ulang konfigurasinya:

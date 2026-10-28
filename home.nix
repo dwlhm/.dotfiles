@@ -64,6 +64,9 @@ in
   imports = [
     ./modules/zsh
     ./modules/git
+    ./modules/tmux
+    ./modules/zed
+    ./modules/ai
   ];
 
   home.username = "dwlhm";
@@ -119,7 +122,6 @@ in
 
     # Editors, Multiplexer & Core Runtime
     neovim
-    tmux
     python3
 
     # AI Code Intelligence & System Maintenance
@@ -127,5 +129,6 @@ in
     ast-grep
     peekaboo
     moleCli
+    claude-code
   ];
 }

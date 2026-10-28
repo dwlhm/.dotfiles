@@ -3,6 +3,7 @@
 _NIX_DOTFILES="${HOME}/.dotfiles"
 _NIX_BINDINGS_FILE="${HOME}/.local/state/nix-envs/bindings.tsv"
 _NIX_SOPS_KEY="${HOME}/.config/sops/age/keys.txt"
+_NIX_GCROOTS_DIR="${HOME}/.local/state/nix-envs/gcroots"
 _NIX_SOPS_SECRETS="${HOME}/.config/sops-nix/secrets"
 
 _nix_apply_identity_session() {
@@ -39,16 +40,26 @@ _nix_activate_stack_in_memory() {
   local stack="${1#\#}"
   [[ -z "${_NIX_BASE_PATH:-}" ]] && export _NIX_BASE_PATH="$PATH"
   local cache_dir="${HOME}/.cache/nix-envs/env-scripts"
-  command mkdir -p "$cache_dir"
+  local profile_dir="${_NIX_GCROOTS_DIR}"
+  command mkdir -p "$cache_dir" "$profile_dir"
   local cache_file="${cache_dir}/${stack}.sh"
+  local profile_path="${profile_dir}/${stack}"
   local lock_mtime
   lock_mtime=$(/usr/bin/stat -f%m "${_NIX_DOTFILES}/flake.nix" "${_NIX_DOTFILES}/flake.lock" "${_NIX_DOTFILES}/modules/devshells.nix" 2>/dev/null | /usr/bin/sort -n | /usr/bin/tail -1)
   local cache_mtime
   cache_mtime=$(/usr/bin/stat -f%m "$cache_file" 2>/dev/null || echo 0)
 
+  if [[ -s "$cache_file" ]]; then
+    local sample_store_path
+    sample_store_path=$(/usr/bin/grep -o '/nix/store/[^:/]*' "$cache_file" 2>/dev/null | /usr/bin/head -1)
+    if [[ -n "$sample_store_path" && ! -e "$sample_store_path" ]]; then
+      cache_mtime=0
+    fi
+  fi
+
   if (( cache_mtime < lock_mtime )) || [[ ! -s "$cache_file" ]]; then
     echo "❄ Building environment #${stack}..."
-    command nix print-dev-env --json "${_NIX_DOTFILES}#${stack}" | /usr/bin/jq -r '
+    command nix print-dev-env --profile "$profile_path" --json "${_NIX_DOTFILES}#${stack}" | /usr/bin/jq -r '
       "export PATH=" + (.variables.PATH.value | @sh) + ":\"$PATH\"\n" +
       (.variables.shellHook.value // "")
     ' > "$cache_file" || { rm -f "$cache_file"; return 1; }
@@ -199,9 +210,16 @@ _nix_cmd_sync() {
 }
 
 _nix_cmd_gc() {
-  local run_mac=0
-  [[ "${1:-}" == "--mac" ]] && run_mac=1
+  local run_mac=0 clean_devshells=0
+  while (( $# > 0 )); do
+    case "$1" in
+      --mac) run_mac=1 ;;
+      --all) clean_devshells=1 ;;
+    esac
+    shift
+  done
   echo "📊 Disk before GC: $(/bin/df -h / | /usr/bin/awk 'NR==2 {print $4 " available (" $5 " used)"}')"
+  (( clean_devshells )) && command rm -rf "${_NIX_GCROOTS_DIR}"/* 2>/dev/null || true
   command rm -rf "${HOME}/.cache/direnv/layouts"/* "${HOME}/.cache/nix-envs/env-scripts"/* 2>/dev/null || true
   command home-manager expire-generations "-7 days" 2>/dev/null || true
   command nix-collect-garbage -d

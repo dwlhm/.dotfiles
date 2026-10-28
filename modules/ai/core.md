@@ -82,7 +82,7 @@ Before declaring a task complete:
 ## Second Brain Maintenance & Context Budget
 
 - Always start from `~/brain/projects/README.md` and `~/brain/knowledge/README.md` and read only what you need—never load whole directories.
-- Treat `~/brain/{projects,knowledge}` as your living long-term memory: update it autonomously in-place (no `chezmoi apply` needed for `~/brain`) so every session compounds engineering accuracy.
+- Treat `~/brain/{projects,knowledge}` as your living long-term memory: update it autonomously in-place so every session compounds engineering accuracy.
 - Guard the context budget: avoid pasting large files or logs; delegate independent research/sub-tasks to sub-agents when appropriate, or recommend a fresh session if the context window is saturated.
 
 ## Git & Commits

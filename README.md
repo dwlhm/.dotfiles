@@ -1,17 +1,18 @@
 # dotfiles
 
-Personal macOS dotfiles dikelola secara deklaratif menggunakan kombinasi **[Chezmoi](https://www.chezmoi.io/)** dan **[Nix Flake (Home Manager)](https://nix-community.github.io/home-manager/)** dengan enkripsi rahasia **[SOPS](https://github.com/getsops/sops)** & **[Age](https://github.com/FiloSottile/age)**.
+Personal macOS dotfiles dikelola secara deklaratif menggunakan **[Nix Flake (Home Manager)](https://nix-community.github.io/home-manager/)** dengan enkripsi rahasia **[SOPS](https://github.com/getsops/sops)** & **[Age](https://github.com/FiloSottile/age)**.
 
 ---
 
-## 1. Arsitektur Dual-System
+## 1. Arsitektur Terpadu (Single Source of Truth)
 
-Sistem ini memisahkan tanggung jawab konfigurasi menjadi dua pilar:
+Seluruh konfigurasi dikelola terpusat oleh Nix Flake & Home Manager:
 
 | Komponen | Alat | Tanggung Jawab |
 |---|---|---|
-| **User Dotfiles & AI Toolchain** | **Chezmoi** | Konfigurasi terminal (Ghostty, Tmux, Zsh), editor (Neovim, Zed), dan AI rules/skills (`~/.config/ai/`). |
-| **Packages, Runtimes & Secrets** | **Nix Flake + SOPS** | CLI core packages (Thin Global Core), ephemeral devShells proyek, enkripsi identitas multi-akun Git dan SSH private keys. |
+| **User Dotfiles & Shell** | **Home Manager** | Konfigurasi Zsh (`modules/zsh`), Tmux (`modules/tmux`), dan Zed Editor (`modules/zed`). |
+| **AI Toolchain & Prompts** | **Home Manager** | Base prompt `core.md`, agent instructions (Codex, Zed, Opencode, Gemini, Pi), skills (`better-ui`, `context-sync`), dan CLI `ai-outline`. |
+| **Packages, Runtimes & Secrets** | **Nix Flake + SOPS** | CLI core packages (Thin Global Core), ephemeral devShells proyek (`modules/devshells.nix`), enkripsi identitas multi-akun Git dan SSH private keys. |
 
 ---
 
@@ -19,18 +20,7 @@ Sistem ini memisahkan tanggung jawab konfigurasi menjadi dua pilar:
 
 Ikuti langkah-langkah berikut saat menyiapkan mesin baru:
 
-### Langkah 1: Install Homebrew & Chezmoi
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install chezmoi
-```
-
-### Langkah 2: Inisialisasi Dotfiles via Chezmoi
-```bash
-chezmoi init --apply --source ~/.dotfiles
-```
-
-### Langkah 3: Install Determinate Nix
+### Langkah 1: Install Determinate Nix
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
 ```
@@ -39,7 +29,13 @@ Pastikan Nix daemon profile sudah termuat pada shell:
 . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 ```
 
-### Langkah 4: Setup Kunci Private Age (SOPS)
+### Langkah 2: Clone Repositori Dotfiles
+```bash
+git clone git@github.com:dwlhm/dotfiles.git ~/.dotfiles
+# atau via HTTPS jika SSH belum aktif
+```
+
+### Langkah 3: Setup Kunci Private Age (SOPS)
 Tempatkan file private key Age antum pada path:
 ```bash
 mkdir -p ~/.config/sops/age
@@ -47,25 +43,31 @@ mkdir -p ~/.config/sops/age
 chmod 0600 ~/.config/sops/age/keys.txt
 ```
 
-### Langkah 5: Sinkronisasi Home Manager & Secrets
-Jalankan perintah sync untuk membangun environment Home Manager, mendekripsi SSH keys, dan menghasilkan konfigurasi Git:
+### Langkah 4: Sinkronisasi Awal Home Manager & Secrets
+Jalankan aktivasi flake untuk membangun environment Home Manager, mendekripsi SSH keys, mengaitkan dotfiles & AI toolchain, serta menghasilkan konfigurasi Git:
 ```bash
+nix run home-manager/master -- switch -b backup --flake ~/.dotfiles
+# Setelah aktif dan shell di-reload, cukup jalankan:
 nix sync
-# atau: home-manager switch -b backup --flake ~/.dotfiles
 ```
 
 ---
 
 ## 3. Daily Usage Cheat Sheet
 
-### Chezmoi (Dotfiles & AI Context)
-* **Melihat perbedaan konfigurasi**:
-  ```bash
-  chezmoi diff
-  ```
+### Dotfiles & Secrets Synchronization
+Untuk menerapkan perubahan konfigurasi pada flake atau secrets:
 * **Menerapkan perubahan ke sistem**:
   ```bash
-  chezmoi apply
+  nix sync
+  ```
+* **Melihat status identitas & secret Git**:
+  ```bash
+  nix id list
+  ```
+* **Mengedit secret terenkripsi (otomatis sync setelah disimpan)**:
+  ```bash
+  nix secret
   ```
 
 ### Nix Helper Commands

@@ -50,7 +50,8 @@ Digunakan ketika antum ingin langsung masuk ke environment compiler tertentu di 
   ```
 
 ### Mekanisme Internal & Caching
-* **Instant In-Memory Caching**: Saat pertama kali dijalankan, `nix change` mengompilasi environment via `nix print-dev-env` dan menyimpannya ke `~/.cache/nix-envs/env-scripts/<stack>.sh`. Panggilan berikutnya berjalan instan ($<10\text{ ms}$) tanpa overhead evaluasi Nix. Cache otomatis di-invalidate jika `flake.lock` atau `modules/devshells.nix` diperbarui.
+* **Instant In-Memory Caching & GC Root Protection**: Saat pertama kali dijalankan, `nix change` mengompilasi environment via `nix print-dev-env --profile ~/.local/state/nix-envs/gcroots/<stack>` dan menyimpannya ke `~/.cache/nix-envs/env-scripts/<stack>.sh`. Panggilan berikutnya berjalan instan ($<10\text{ ms}$) tanpa overhead evaluasi Nix. Pendaftaran GC Root resmi memastikan seluruh dependensi stack di `/nix/store` terlindungi dari `nix-collect-garbage`.
+* **Self-Healing Guard**: Helper memverifikasi keberadaan path `/nix/store` sebelum meload cache; jika paket terhapus, cache otomatis di-rebuild secara transparan.
 * **Auto-Directory Binding (`chpwd` hook)**: Pilihan stack dan identitas disimpan ke `~/.local/state/nix-envs/bindings.tsv`. Saat berpindah direktori (`cd`) ke folder proyek terkait, environment dan Git credentials otomatis disesuaikan.
 
 ---
@@ -146,6 +147,9 @@ Seiring waktu, compiler dan pustaka dari devshell tersimpan di Nix store. Gunaka
 ```bash
 # Bersihkan cache direnv, script environment, generasi HM >7 hari, dan nix store
 nix gc
+
+# Sekaligus bersihkan GC roots devShells jika ingin mengosongkan seluruh cache stack
+nix gc --all
 
 # Sekaligus bersihkan system cache macOS via Mole (mo clean)
 nix gc --mac

@@ -36,7 +36,7 @@ ai-outline /path/to/project/module_or_file
 
 ### 3. Direct Update & Self-Improvement in `~/brain`
 
-Edit `~/brain/projects/<project>.md` or `~/brain/knowledge/<topic>.md` directly (no `chezmoi apply` needed):
+Edit `~/brain/projects/<project>.md` or `~/brain/knowledge/<topic>.md` directly:
 
 1. **Project Context Sync (`~/brain/projects/<project>.md`)**:
    * Update module lists, features, middleware, Makefile targets, DesignSystem components, or Core Invariants.
