@@ -85,6 +85,13 @@ Before declaring a task complete:
 - Treat `~/brain/{projects,knowledge}` as your living long-term memory: update it autonomously in-place so every session compounds engineering accuracy.
 - Guard the context budget: avoid pasting large files or logs; delegate independent research/sub-tasks to sub-agents when appropriate, or recommend a fresh session if the context window is saturated.
 
+## Multi-Agent Orchestration (Luvus)
+
+- When the user asks to run several agents inside Luvus (`LUVUS_ENV=1`), use its task engine, never hand-split panes or `pane run` TUIs: `luvus task add "<title>" --prompt-file <f> --paths <globs> --gate "<check cmd>"`, then `luvus task start <id> --agent luvus-oc-worker --mode workspace|worktree --no-focus`.
+- Lead first, workers second: write the spec, design tokens, and shared contracts yourself before starting workers; give each worker small, disjoint files so the slow free model finishes in minutes, not tens of minutes.
+- Wait event-driven on `luvus events` (task status/notes), never sleep-poll. A failed gate lands the task in `review` with its output: fix the brief and `luvus task retry`, or finish it yourself.
+- Never trust worker self-reports: re-run the gate and review the diff before accepting. Details: `~/brain/knowledge/luvus-opencode.md`.
+
 ## Git & Commits
 
 - Use Conventional Commits: `type(scope): description` (`feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `build`, `ci`).

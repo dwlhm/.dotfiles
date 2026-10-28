@@ -94,6 +94,10 @@ in
       source = ./skills/context-sync/scripts/ai-outline;
       executable = true;
     };
+    ".local/bin/luvus-oc-worker" = {
+      source = ./bin/luvus-oc-worker;
+      executable = true;
+    };
     ".claude/CLAUDE.md".text = claudePrompt;
     ".codex/AGENTS.md".text = codexPrompt;
     ".gemini/GEMINI.md".text = geminiPrompt;
@@ -103,4 +107,11 @@ in
   // (mkSkillSymlinks ".codex/skills")
   // (mkSkillSymlinks ".gemini/config/skills")
   // (mkSkillSymlinks ".pi/agent/skills");
+
+  # 3. Luvus owns its version-matched skill; (re)install it into every detected agent host.
+  home.activation.luvusSkill = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ -x "${homeDir}/.local/bin/luvus" ]; then
+      run "${homeDir}/.local/bin/luvus" skill enable >/dev/null
+    fi
+  '';
 }
