@@ -1,0 +1,5 @@
+open $QA_URL/#/beta/code-title.md
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'The qa Tool'"
+wait --fn "document.title === 'The qa Tool — docs'"
+wait --fn "[...document.querySelectorAll('nav#tree a')].some(a => a.textContent.trim() === 'The qa Tool')"
+wait --fn "document.querySelectorAll('article#doc h1').length === 0"

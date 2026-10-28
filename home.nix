@@ -68,6 +68,8 @@ in
     ./modules/zed
     ./modules/ai
     ./modules/luvus
+    ./modules/qa
+    ./modules/docs
   ];
 
   home.username = "dwlhm";

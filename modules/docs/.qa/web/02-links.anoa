@@ -1,0 +1,8 @@
+open $QA_URL/#/alpha/guide.md
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'Alpha Guide'"
+click "article#doc a[href='#/alpha/notes/setup.md']"
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'Setup Notes'"
+click "article#doc a[href='#/alpha/guide.md#install']"
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'Alpha Guide'"
+click "article#doc a[href='#/beta/beta-reference.md']"
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'Beta Reference'"

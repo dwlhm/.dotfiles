@@ -1,0 +1,2 @@
+open $QA_URL/#/alpha/guide.md#deep-section
+wait --fn "(() => { const h = document.getElementById('deep-section'); return h && h.getBoundingClientRect().top < innerHeight / 2; })()"

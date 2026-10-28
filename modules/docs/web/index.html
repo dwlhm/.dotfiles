@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>docs</title>
+    <link rel="stylesheet" href="vendor/hljs-light.css" media="(prefers-color-scheme: light)">
+    <link rel="stylesheet" href="vendor/hljs-dark.css" media="(prefers-color-scheme: dark)">
+    <link rel="stylesheet" href="style.css">
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar" aria-label="Documentation navigation">
+        <div class="search-box">
+          <input type="search" id="search" placeholder="Search docs... (/ to focus)" autocomplete="off">
+          <ul id="results"></ul>
+        </div>
+        <nav id="tree"></nav>
+      </aside>
+      <main class="main-content">
+        <div class="document-container">
+          <header class="doc-header">
+            <h1 id="doc-title"></h1>
+          </header>
+          <article id="doc"></article>
+        </div>
+      </main>
+      <aside class="toc-sidebar" aria-label="Table of contents">
+        <div class="toc-container">
+          <div class="toc-header">On this page</div>
+          <nav id="toc"></nav>
+        </div>
+      </aside>
+    </div>
+  </body>
+</html>

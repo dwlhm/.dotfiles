@@ -8,13 +8,16 @@
 set -eu
 
 : "${LUVUS_TASK_ID:?luvus-worker must be launched by luvus task start}"
-[ "$#" -eq 2 ] || { echo "usage: luvus-worker small|medium <briefing>" >&2; exit 64; }
+[ "$#" -eq 2 ] || { echo "usage: luvus-worker small|medium|qa <briefing>" >&2; exit 64; }
 
 case "$1" in
   small) CHAIN="oc:opencode/deepseek-v4.1-flash-free oc:opencode/beam-free agy:gemini-3.8-flash-low" ;;
   medium) CHAIN="agy:gemini-3.8-flash-medium oc:opencode/deepseek-v4.1-flash-free agy:gemini-4-argon-medium" ;;
-  *) echo "luvus-worker: unknown tier '$1' (small|medium)" >&2; exit 64 ;;
+  # UI testing needs a shell (`qa web …`, `qa browse …`), which only OpenCode can run headless.
+  qa) CHAIN="oc:opencode/deepseek-v4.1-flash-free oc:opencode/beam-free" OC_ALLOW="qa *" ;;
+  *) echo "luvus-worker: unknown tier '$1' (small|medium|qa)" >&2; exit 64 ;;
 esac
+OC_ALLOW="${OC_ALLOW:-}"
 CHAIN="${LUVUS_WORKER_CHAIN:-$CHAIN}"
 LIMIT="${LUVUS_WORKER_TIMEOUT:-1500}"
 BRIEF="$2"
@@ -30,9 +33,10 @@ export LUVUS_WORKER LUVUS_WORKER_GATE
 with_limit() { perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$LIMIT" "$@"; }
 
 run_oc() {
-  OPENCODE_CONFIG_CONTENT=$(jq -nc --arg m "$1" --arg g "$LUVUS_WORKER_GATE" '{model: $m,
+  OPENCODE_CONFIG_CONTENT=$(jq -nc --arg m "$1" --arg g "$LUVUS_WORKER_GATE" --arg x "$OC_ALLOW" '{model: $m,
     permission: {edit: "allow", webfetch: "deny", execute: "deny",
-      bash: ({"*": "deny", "luvus task *": "allow"} + (if $g == "" then {} else {($g): "allow"} end))}}')
+      bash: ({"*": "deny", "luvus task *": "allow"} + (if $g == "" then {} else {($g): "allow"} end)
+        + (if $x == "" then {} else {($x): "allow"} end))}}')
   export OPENCODE_CONFIG_CONTENT
   with_limit opencode run --standalone --auto --title "$LUVUS_TASK_ID" "$2"
 }

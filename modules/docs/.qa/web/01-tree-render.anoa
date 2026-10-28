@@ -1,0 +1,12 @@
+open $QA_URL/
+wait --selector "nav#tree details summary"
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'Alpha Guide'"
+click "nav#tree a[href='#/beta/untitled-note.md']"
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'untitled-note'"
+click "nav#tree a[href='#/alpha/guide.md']"
+wait --fn "document.querySelector('h1#doc-title')?.textContent === 'Alpha Guide'"
+wait --fn "document.title === 'Alpha Guide — docs'"
+wait --selector "article#doc table td"
+wait --selector "article#doc pre button.copy"
+wait --selector "article#doc pre code.hljs"
+wait --selector "nav#toc a[href*='deep-section']"

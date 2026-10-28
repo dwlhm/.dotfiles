@@ -1,0 +1,19 @@
+#!/bin/sh
+# qa: one entry point for agent-driven UI testing; each platform owns its full lifecycle
+# (start device/server → wait ready → run flows → collect evidence in .qa/out → teardown).
+#   qa web run|up|down …   anoa flows (.qa/web/*.anoa) against a local web app
+#   qa browse <verb> …      drive the browser of a running `qa web up` session (allowlisted verbs)
+#   qa android run|up|down|hierarchy|screenshot …   Maestro flows (.maestro/*.yaml) on an emulator
+#   qa macos run|screenshot …                     XCUITest UI tests via xcodebuild
+set -eu
+
+QA_SELF=$(realpath "$0")
+QA_LIB="${QA_LIB:-$(dirname "$QA_SELF")/../share/qa}"
+
+case "${1:-}" in
+  web) shift; . "$QA_LIB/web.sh"; qa_web "$@" ;;
+  browse) shift; . "$QA_LIB/web.sh"; qa_browse "$@" ;;
+  android) shift; . "$QA_LIB/android.sh"; qa_android "$@" ;;
+  macos) shift; . "$QA_LIB/macos.sh"; qa_macos "$@" ;;
+  *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+esac

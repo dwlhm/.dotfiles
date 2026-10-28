@@ -63,7 +63,7 @@ in {
     fi
   '';
 
-  android = mkLeanShell "android" [ ] ''
+  android = mkLeanShell "android" [ pkgs.maestro ] ''
     if [[ -d "/Applications/Android Studio.app/Contents/jbr/Contents/Home" ]]; then
       export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
       export PATH="$JAVA_HOME/bin:$PATH"
