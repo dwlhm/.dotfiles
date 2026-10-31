@@ -59,16 +59,39 @@ export async function reconcile(e: Engine): Promise<void> {
   }
 }
 
+/** One wait for child news is at most this long; much more between checks means the machine slept. */
+export const WAIT_SECONDS = 30;
+export const SLEEP_GAP_SECONDS = 120;
+
+/**
+ * The machine slept (a laptop lid, macOS maintenance sleep): wall-clock time went on but no agent
+ * could work, so every active run's limits and reminder move on by the time lost. Without this a
+ * wake ends every run as "still working after N minutes" at once.
+ */
+export function shiftForSleep(e: Engine, lostMs: number): void {
+  for (const a of e.active.values()) {
+    a.limitsFrom = (a.limitsFrom ?? Date.parse(a.run.started)) + lostMs;
+    if (a.nudged) a.nudged += lostMs;
+  }
+  e.d.log(`the machine slept for about ${Math.round(lostMs / 60000)} min; run limits moved on by that`);
+}
+
 /** Runs until `stop()` returns true: wait for child news, reconcile, back off when nothing moves. */
 export async function watch(e: Engine, stop: () => boolean, sleep = (ms: number) => Bun.sleep(ms)): Promise<void> {
+  let checked = e.d.now().getTime(); // when the runs were last reconciled
   while (!stop()) {
     if (!e.active.size) {
       await sleep(1000);
+      checked = e.d.now().getTime();
       continue;
     }
-    const t0 = Date.now();
-    await e.d.host.waitChildren(30);
+    await e.d.host.waitChildren(WAIT_SECONDS);
+    // Measured right before acting on what the host reports: a wake must not end runs first.
+    const gap = e.d.now().getTime() - checked;
+    if (gap > SLEEP_GAP_SECONDS * 1000) shiftForSleep(e, gap - WAIT_SECONDS * 1000);
+    const t0 = e.d.now().getTime();
     await reconcile(e);
-    if (Date.now() - t0 < 1000) await sleep(2000);
+    checked = e.d.now().getTime();
+    if (checked - t0 < 1000) await sleep(2000);
   }
 }
