@@ -70,6 +70,7 @@ in
     ./modules/luvus
     ./modules/qa
     ./modules/docs
+    ./modules/workflow
   ];
 
   home.username = "dwlhm";
