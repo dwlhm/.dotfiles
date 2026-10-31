@@ -12,6 +12,7 @@ export type Limits = {
   context_bytes: number;
   start_seconds: number;
   run_minutes: number;
+  check_minutes: number;
 };
 export type Policy = { rules: Rule[]; ui_globs: string[]; limits: Limits; integration_branch: string };
 
@@ -23,6 +24,7 @@ const LIMITS: (keyof Limits)[] = [
   "context_bytes",
   "start_seconds",
   "run_minutes",
+  "check_minutes",
 ];
 
 function loadRules(c: Check, d: Record<string, unknown>, vocab: Vocab): Rule[] {

@@ -20,6 +20,7 @@ limits:
   context_bytes: 24000
   start_seconds: 120
   run_minutes: 20
+  check_minutes: 10
 integration_branch: wf/integration
 ---
 
@@ -36,4 +37,5 @@ reason when it breaks one of them.
 - `start_seconds`: a run that has not started working by then is an `infra` failure; statuses
   before it first works (a sign-in or trust notice, an idle prompt) are startup noise.
 - `run_minutes`: a run still working after this is stopped as an `infra` failure.
+- `check_minutes`: the longest the engine lets a step's check run before it counts as failed.
 - The integration branch is merged into `main` only on the user's command.

@@ -21,7 +21,7 @@ test("submit waits for the answer that a worker reports over the same socket", a
   expect(await request({ op: "report", run: "w1.1-r1", outcome: "done", text: "42" }, path)).toEqual({ ok: true });
   expect(await answer).toEqual({ ok: true, task: "w1", status: "done", text: "42" });
   expect(await request({ op: "report", run: "w1.1-r1", outcome: "done", text: "x" }, path)).toMatchObject({ ok: false, error: expect.stringMatching(/not active/) });
-  expect(await request({ op: "submit", submit: { ...ask, command: "fix" }, wait: false }, path)).toMatchObject({ ok: false, error: "'fix' is not available yet" });
+  expect(await request({ op: "submit", submit: { ...ask, command: "build" }, wait: false }, path)).toMatchObject({ ok: false, error: "'build' is not available yet" });
   await running.stop();
   expect(existsSync(path)).toBe(false);
 });

@@ -31,8 +31,9 @@ function fill(template: string, vars: Vars): string {
   });
 }
 
-export function renderPrompt(o: { role: Role; vocab: Vocab; vars: Vars; context: Section[]; run: string; multiline: boolean }): string {
+export function renderPrompt(o: { role: Role; vocab: Vocab; vars: Vars; context: Section[]; run: string; multiline: boolean; feedback?: string }): string {
   for (const need of o.role.needs) if (o.vars[need] === undefined) throw new Error(`role ${o.role.name} needs '${need}'`);
-  const body = fill(o.role.prompt, { ...o.vars, context: contextBlock(o.context) });
-  return `${body.trim()}\n\n${reportBlock(o.role, o.vocab, o.run, o.multiline)}\n`;
+  const feedback = o.feedback ? `An earlier attempt at this step did not pass. Continue from the current files and fix this:\n${o.feedback.trim()}` : "";
+  const body = fill(o.role.prompt, { ...o.vars, context: contextBlock(o.context), feedback });
+  return `${body.trim().replace(/\n{3,}/g, "\n\n")}\n\n${reportBlock(o.role, o.vocab, o.run, o.multiline)}\n`;
 }

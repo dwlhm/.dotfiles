@@ -14,4 +14,6 @@ Fix causes, not symptoms. Do not start other agents. If the step turns out to ne
 focused change, stop and report `too_big` with the sub-steps you propose. If the goal is unclear
 (what/why), report `question` instead of guessing.
 
+{{feedback}}
+
 {{context}}

@@ -81,3 +81,8 @@ export async function makeEngine(o: { runners?: Runner[]; knowledge?: Knowledge;
 export const settle = async () => {
   for (let i = 0; i < 20; i++) await Bun.sleep(1);
 };
+
+/** Wait (bounded) until `ready()` holds: for work that runs git or spawns before it is observable. */
+export async function until(ready: () => boolean, ms = 5000): Promise<void> {
+  for (const t0 = Date.now(); !ready(); await Bun.sleep(5)) if (Date.now() - t0 > ms) throw new Error("test: condition not reached");
+}

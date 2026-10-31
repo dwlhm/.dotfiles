@@ -3,24 +3,9 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { exec, type Exec } from "./exec";
 
-export type Exec = (cmd: string, args: string[], cwd: string) => Promise<{ code: number; out: string; err: string }>;
 export type Target = { kind: "changes" | "branch" | "pr" | "path"; label: string; text: string };
-
-/** How long one git or gh call may take before it is killed (a stalled network, a lock). */
-export const EXEC_SECONDS = 60;
-
-/** A missing program or folder is an exit code (127), like a shell's, not a thrown spawn error. */
-export const exec: Exec = async (cmd, args, cwd) => {
-  try {
-    const p = Bun.spawn([cmd, ...args], { cwd, stdout: "pipe", stderr: "pipe", timeout: EXEC_SECONDS * 1000 });
-    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
-    if (p.signalCode === "SIGTERM") return { code: 124, out, err: `${cmd} timed out after ${EXEC_SECONDS}s` };
-    return { code, out, err: err.trim() };
-  } catch (e) {
-    return { code: 127, out: "", err: `${cmd}: ${(e as Error).message}` };
-  }
-};
 
 /** The most of a PR's diff (in characters) put into the prompt; the rest is named by file. */
 export const MAX_DIFF = 60_000;

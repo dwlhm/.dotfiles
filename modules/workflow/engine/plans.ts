@@ -8,7 +8,9 @@ import { stepId } from "./ids";
 import type { Vars } from "./prompt";
 
 /** The prompt variables the engine can fill so far; a role needing others is not runnable yet. */
-export const SUPPLIED = ["question", "goal", "about", "answers", "target"];
+export const SUPPLIED = ["question", "goal", "about", "answers", "target", "brief", "only", "check"];
+/** Roles whose output the engine cannot turn into work yet (a plan becomes steps in `build`). */
+export const NOT_YET = ["plan"];
 /** How many agents `compare` asks when the user names none. */
 export const MANY_DEFAULT = 3;
 
@@ -16,7 +18,10 @@ export const MANY_DEFAULT = 3;
 export const needs = (spec: Spec, c: Command, v: string): boolean => c.roles.some((r) => spec.roles.get(r)!.needs.includes(v));
 
 export const available = (spec: Spec, c: Command): boolean =>
-  c.roles.every((r) => spec.roles.get(r)!.needs.every((n) => SUPPLIED.includes(n)));
+  c.roles.every((r) => !NOT_YET.includes(r) && spec.roles.get(r)!.needs.every((n) => SUPPLIED.includes(n)));
+
+/** Whether a role edits files (and so is a patch step: worktree, check, merge). */
+export const edits = (spec: Spec, role: string): boolean => spec.roles.get(role)!.can.includes("edit");
 
 export type Finished = { step: Step; agent: string; text: string };
 
@@ -60,10 +65,11 @@ export function planSteps(spec: Spec, runners: Map<string, Runner>, cmd: Command
 export const laterWith = (cmd: Command, wanted: string[]): string[] => (cmd.many ? [] : wanted);
 
 /** `target` is the resolved review target (kept in runtime state, never in the record). */
-export function varsFor(task: Task, finished: Finished[], target?: string): Vars {
+export function varsFor(task: Task, finished: Finished[], target?: string, step?: Step): Vars {
   const answers = finished.map((f) => `### ${f.agent}\n${f.text.trim()}`).join("\n\n");
   const about = (task.options.about as string[] | undefined) ?? ["the whole folder"];
-  return { question: task.goal, goal: task.goal, about, answers, ...(target === undefined ? {} : { target }) };
+  const patch = step?.check ? { brief: task.goal, only: step.only.length ? step.only : ["any file in the repository"], check: step.check } : {};
+  return { question: task.goal, goal: task.goal, about, answers, ...patch, ...(target === undefined ? {} : { target }) };
 }
 
 /** A later stage runs only on enough input: one finished step, or two for a `many` comparison. */

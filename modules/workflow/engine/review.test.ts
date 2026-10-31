@@ -2,7 +2,8 @@ import { test, expect } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { exec, resolveTarget, MAX_DIFF, type Exec } from "./targets";
+import { resolveTarget, MAX_DIFF } from "./targets";
+import { exec, type Exec } from "./exec";
 import { makeEngine, fakeRunner, settle } from "./testkit";
 
 async function repo(): Promise<string> {

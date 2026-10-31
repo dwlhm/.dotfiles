@@ -24,6 +24,21 @@ title, body and diff (capped) fenced as untrusted data the content cannot close;
 only reads, needs no network and no gh, and the repo is never changed. The resolved target text
 lives in `~/.local/state/wf/tasks/<id>/target.md`; the record keeps only its label.
 
+`fix` (patch work, `engine/land.ts`): the check is the user's `check "…"`, or the repo's one
+unambiguous, runnable test command (`engine/checks.ts`), else the user is asked to name it. Work
+starts from the user's HEAD plus what wf already merged into `wf/integration` and the user has
+not merged yet (a merge made in the object store only; a conflict between them is refused up
+front). Each patch step gets a branch `wf/<step>` (suffixed when taken) and a worktree under
+`~/.local/state/wf/worktrees/<repo>-<hash>/`; the worker edits there. When it reports done, the
+engine itself checks: something changed, only inside `only`, the check passes, then commits,
+runs `leak_check` (a long line of the run's private context inside an added line blocks it) and
+merges `--no-ff` into `wf/integration` in its own worktree (or wherever that branch is already
+checked out, if clean). A failure goes back to the worker as feedback: the same model retries up
+to `retries_per_tier`, then a higher tier. A merge conflict is the user's. The user's checkout,
+index and current branch are never touched; `wf/integration` reaches their branch only on their
+command. Claude Code must trust the worktree folder once (open `claude` in
+`~/.local/state/wf/worktrees` and accept); until then claude runs fall back to other runners.
+
 Options are plain words with one concrete argument (`in`, `only`, `check`, `with`, `about`,
 `ask-first`, `just-go`, `no-merge`, `report-to`). Internal names (role, tier, policy) never show
 up in what the user types. The source of truth is `spec/commands.md`.

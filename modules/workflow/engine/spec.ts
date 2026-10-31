@@ -34,7 +34,7 @@ export type Spec = {
 };
 
 /** Filled by the engine for every role, so a prompt may use it without listing it in `needs`. */
-export const ENGINE_VARS = ["context"];
+export const ENGINE_VARS = ["context", "feedback"];
 
 const keys = (c: Check, doc: Doc, field: string) => new Set(Object.keys(c.map(doc.data, field) ?? {}));
 

@@ -13,8 +13,11 @@ import { choices, type Choice, type Runner } from "./runners";
 import { renderPrompt } from "./prompt";
 import { runId } from "./ids";
 import { wfEnv } from "./paths";
-import { resolveTarget, type Exec } from "./targets";
-import { available, enoughInput, laterWith, needs, planSteps, resultOf, varsFor, why, type Finished } from "./plans";
+import { resolveTarget } from "./targets";
+import type { Exec } from "./exec";
+import { available, edits, enoughInput, laterWith, needs, planSteps, resultOf, varsFor, why, type Finished } from "./plans";
+import { nextChoice } from "./retry";
+import { assignPatch, landStep, preparePatch, workdir } from "./patch";
 
 export type Deps = {
   spec: Spec;
@@ -61,7 +64,10 @@ export class Engine {
     const wanted = (s.options.with as string[] | undefined) ?? [];
     const target = needs(this.d.spec, cmd, "target") ? await resolveTarget(s.goal, s.folder, this.d.exec) : undefined;
     if (target) s = { ...s, options: { ...s.options, target_label: target.label } };
+    const patch = cmd.roles.some((r) => edits(this.d.spec, r)) ? await preparePatch(this.d.spec, s, this.d.exec) : undefined;
+    if (patch) s = { ...s, options: { ...s.options, root: patch.root, base: patch.base } };
     const steps = planSteps(this.d.spec, this.d.runners, cmd, this.d.store.peekId(), s.goal, wanted);
+    if (patch) await assignPatch(this.d.spec, steps, patch, this.d.state, this.d.exec);
     const id = this.d.store.nextId();
     // A PR's diff is third-party and can be large: runtime state, never the brain record.
     if (target) writeState(this.d.state, id, "target.md", target.text);
@@ -73,12 +79,11 @@ export class Engine {
     return task;
   }
 
-  /** The runs a step may still try, in order: eligible choices not yet used by an earlier run. */
-  remaining(task: Task, step: Step): Choice[] {
+  /** Every runner+model a step may use, cheapest first. */
+  choicesFor(task: Task, step: Step): Choice[] {
     const role = this.d.spec.roles.get(step.role)!;
-    const tried = new Set(step.runs.map((r) => `${r.runner} ${r.model}`));
     const only = step.with ?? laterWith(this.cmd(task), (task.options.with as string[] | undefined) ?? []);
-    return choices(role, this.d.runners, this.d.spec.vocab.tiers, only).filter((c) => !tried.has(`${c.runner.name} ${c.model.id}`));
+    return choices(role, this.d.runners, this.d.spec.vocab.tiers, only);
   }
 
   /** Finished steps (of `ids`, else all) with their result text, read back from the run artifacts. */
@@ -107,7 +112,7 @@ export class Engine {
   }
 
   dispatch(task: Task, step: Step): void {
-    const next = this.remaining(task, step)[0];
+    const next = nextChoice(this.choicesFor(task, step), step.runs, this.d.spec.vocab.tiers, this.d.spec.policy.limits.retries_per_tier);
     if (!next) {
       step.status = "failed";
       this.d.log(`${step.id} failed: ${why(step)}`);
@@ -118,8 +123,10 @@ export class Engine {
     const context = this.d.knowledge.context({ folder: task.folder, paths: (task.options.about as string[]) ?? [], goal: task.goal, budget: this.d.spec.policy.limits.context_bytes });
     let prompt: string;
     try {
-      const vars = varsFor(task, this.finished(task, step.deps), readState(this.d.state, task.id, "target.md"));
-      prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars, context, run: id, multiline: next.runner.multiline });
+      const vars = varsFor(task, this.finished(task, step.deps), readState(this.d.state, task.id, "target.md"), step);
+      const last = step.runs.at(-1);
+      const feedback = last?.outcome === "fail" ? readFileSync(join(this.d.state, "runs", last.id, "report.md"), "utf8") : undefined;
+      prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars, context, run: id, multiline: next.runner.multiline, feedback });
     } catch (e) {
       step.status = "failed";
       return void this.d.log(`${step.id} failed: cannot build its prompt: ${(e as Error).message}`);
@@ -127,22 +134,41 @@ export class Engine {
     const run: Run = { id, runner: next.runner.name, model: next.model.id, terminal: null, started: this.stamp(), ended: null, outcome: null };
     step.runs.push(run);
     step.status = "running";
+    // What private context this run saw: the leak check compares the patch against it.
+    mkdirSync(join(this.d.state, "runs", id), { recursive: true });
+    writeFileSync(join(this.d.state, "runs", id, "context.md"), context.map((c) => c.text).join("\n\n"));
     this.active.set(id, { task, step, run, working: false, nudged: 0 });
     void this.spawn(this.active.get(id)!, next, prompt);
   }
 
   private async spawn(a: Active, c: Choice, prompt: string): Promise<void> {
     const role = this.d.spec.roles.get(a.step.role)!;
+    let cwd: string;
     try {
-      if (c.runner.trust) await c.runner.code.trust!(a.task.folder);
-      const l = c.runner.code.launch({ model: c.model.id, prompt, cwd: a.task.folder, can: role.can, check: a.step.check });
+      cwd = await workdir(a.task, a.step, this.d.exec);
+    } catch (e) {
+      // Fails the same way for every runner: the step stops here instead of trying them all.
+      return this.abandon(a, `could not prepare its folder: ${(e as Error).message}`);
+    }
+    try {
+      if (c.runner.trust) await c.runner.code.trust!(cwd);
+      const l = c.runner.code.launch({ model: c.model.id, prompt, cwd, can: role.can, check: a.step.check });
       const env = { ...wfEnv(), ...l.env };
-      a.run.terminal = await this.d.host.spawn({ name: terminalName(a.run.id), cwd: a.task.folder, argv: l.argv, env, labels: { "wf.run": a.run.id } });
+      a.run.terminal = await this.d.host.spawn({ name: terminalName(a.run.id), cwd, argv: l.argv, env, labels: { "wf.run": a.run.id } });
       this.d.store.save(a.task);
       this.d.log(`${a.run.id} ${c.runner.name}·${c.model.id} on ${a.run.terminal}`);
     } catch (e) {
       await this.finish(a, "infra", `could not start: ${(e as Error).message}`);
     }
+  }
+
+  /** End a run and its step for a reason no other runner would change. */
+  private abandon(a: Active, reason: string): void {
+    this.active.delete(a.run.id);
+    Object.assign(a.run, { ended: this.stamp(), outcome: "infra", summary: firstLine(reason) });
+    a.step.status = "failed";
+    this.d.log(`${a.step.id} failed: ${reason}`);
+    this.advance(a.task);
   }
 
   /** A worker's `wf report`. Errors are for the worker: they say what to fix. */
@@ -160,16 +186,18 @@ export class Engine {
     if (!this.active.delete(a.run.id)) return;
     const dir = join(this.d.state, "runs", a.run.id);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "report.md"), text);
     if (a.run.terminal) {
       writeFileSync(join(dir, "screen.txt"), await this.d.host.snapshot(a.run.terminal, 200).catch(() => ""));
       await this.d.host.close(a.run.terminal).catch(() => {});
     }
-    Object.assign(a.run, { ended: this.stamp(), outcome, summary: firstLine(text) });
+    const landed = outcome === "done" && a.step.worktree ? await landStep(this.d.spec, this.d.state, a.task, a.step, this.d.exec) : undefined;
+    if (landed) ({ outcome, text } = landed.ok ? { outcome, text: `${landed.text}\n\n${text.trim()}` } : { outcome: landed.outcome, text: landed.reason });
+    writeFileSync(join(dir, "report.md"), text);
+    Object.assign(a.run, { ended: this.stamp(), outcome: outcome === "blocked" ? "stuck" : outcome, summary: firstLine(text) });
     this.d.log(`${a.run.id} ${outcome}: ${firstLine(text)}`);
     const { task, step } = a;
     const cmd = this.cmd(task);
-    if (outcome === "infra") this.dispatch(task, step);
+    if (outcome === "infra" || outcome === "fail") this.dispatch(task, step);
     else if (outcome === "done") step.status = "done";
     else if (cmd.many && step.role === cmd.roles[0]) step.status = "failed"; // one agent drops out
     else return this.close(task, "blocked", text, step);
