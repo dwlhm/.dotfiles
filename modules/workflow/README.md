@@ -120,6 +120,44 @@ what the program reports (OSC 7501): a run has started once it was seen `working
 - `record_decision(…)` only when the user says so, after confirming wording and scope
   (`project` or `all`). Decisions are revisable: later tasks surface them as questions.
 
+## Control commands (contract)
+
+`<what>` is a task, step or run id (`w12`, `w12.2`, `w12.2.1`, `w12.2-r1`) or words matched,
+case-insensitively, as a substring of open tasks' goals and step titles. Exactly one match is
+needed; otherwise the error lists the candidates as `id: title`. The resolution is pure, in
+`engine/select.ts`: `select(tasks, words) → { task, step?, run? } | { error }`.
+
+Engine side (`engine/control.ts`: functions over the engine, like `engine/build.ts`; each a
+server op; every refusal names the task's current status):
+
+- `status` → each open task: id, command, status, goal, done/total over its work leaves, and its
+  active runs (run id, runner·model, terminal address).
+- `show <what>` → text. A task: its header, then its steps as a tree (two spaces per depth)
+  `w12.2 [running] <title>`, each followed by its runs `w12.2-r1 opencode·<model> <outcome or
+  running>: <summary> (<terminal>)`. A step: the same for that step. A run: runner, model,
+  terminal, started, ended, outcome, summary, and the paths of its saved artifacts
+  (`<state>/runs/<run>/report.md`, `screen.txt`, `context.md`, those that exist).
+- `pause <task>`: running → `paused`; nothing new is dispatched while paused, active runs go on
+  and are still reconciled. `resume <task>`: paused → running, then advance.
+- `stop <task>`: every active run is ended with the engine outcome `stopped` (added to the vocab:
+  "The user stopped the task") and its terminal closed; unstarted steps become `stopped`; the
+  task closes as `stopped`. Worktrees and branches are kept and listed in the result.
+- `tell <task> "<text>"`: while running, typed into every active run's terminal as
+  `Message from the user: <text>`; while awaiting approval, the existing plan change.
+- `take <step|run>`: the step's active run is taken — the engine stops reconciling it (no start
+  or run time limits, no reminders) until `give back`; the reply gives its terminal address. The
+  run still ends through `wf report` (the user may run it). `give back <step|run>`: reconciling
+  resumes, with its time limits counted from now.
+
+CLI side (`engine/control-cli.ts`, keeping `engine/cli.ts` small): `wf status`, `wf show
+<what>`, `wf watch <what>` (the active run's terminal through `hc attach`; an ended run prints its
+saved `screen.txt`), `wf pause|resume|stop <what>`, `wf tell <what> "<text>"`, `wf take <what>`,
+`wf give back <what>`, and `wf merge [in <folder>]`, which needs no engine: in the user's repo it
+refuses a dirty working tree or an integration branch with nothing new, else runs
+`git merge --no-ff wf/integration -m "Merge wf/integration"`; on conflict it aborts the merge and
+lists the files. This is the only command that changes the user's branch, and only when they run
+it.
+
 ## Where things live
 
 | Place | Holds |
