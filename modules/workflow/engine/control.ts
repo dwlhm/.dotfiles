@@ -25,8 +25,34 @@ function taskFor(e: Engine, what: string, op: string): Task {
 
 const activeFor = (e: Engine, task: Task) => [...e.active.values()].filter((a) => a.task.id === task.id);
 
+/** The structured form of `status`, for programs (the board). */
+export function statusData(e: Engine): { tasks: Array<{ id: string; command: string; status: string; goal: string; done: number; total: number; runs: Array<{ id: string; runner: string; model: string; terminal: string | null; taken: boolean }> }> } {
+  return {
+    tasks: [...e.tasks.values()].map((task) => {
+      const leaves = flat(workSteps(e, task)).filter((s) => !s.steps.length);
+      const done = leaves.filter((s) => s.status === "done").length;
+      const runs = activeFor(e, task).map((a) => ({
+        id: a.run.id,
+        runner: a.run.runner,
+        model: a.run.model,
+        terminal: a.run.terminal,
+        taken: a.taken === true,
+      }));
+      return { id: task.id, command: task.command, status: task.status, goal: task.goal, done, total: leaves.length, runs };
+    }),
+  };
+}
+
+/** `status` as JSON. */
+export const statusJson = (e: Engine, _json?: unknown): string => JSON.stringify(statusData(e));
+
 /** `status`: each open task with its work progress and the runs it has in flight. */
-export function status(e: Engine): string {
+export function status(e: Engine, json?: boolean | string | { json?: boolean | string; format?: string }): string {
+  const wantJson =
+    json === true ||
+    json === "json" ||
+    (typeof json === "object" && json !== null && (json.json === true || json.json === "json" || json.format === "json"));
+  if (wantJson) return statusJson(e);
   const tasks = [...e.tasks.values()];
   if (!tasks.length) return "no open tasks";
   return tasks
@@ -192,3 +218,5 @@ export function giveBack(e: Engine, what: string): string {
   e.d.log(`${run.id} given back`);
   return `${run.id} is back with the engine; its time limits count from now`;
 }
+
+export const statusJSON = statusJson;

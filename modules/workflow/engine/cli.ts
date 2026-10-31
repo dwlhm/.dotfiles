@@ -24,7 +24,7 @@ ${live.map((c) => `  wf ${c.example.padEnd(width)}  ${c.about}`).join("\n")}
 
   wf approve <task>                    start the work of a plan that waits for you
   wf report <run> <outcome> ["text"]   for workers: hand back a run's outcome (text or stdin)
-  wf status                            every open task, its progress and the runs in flight
+  wf status [--json]                   every open task, its progress and the runs in flight (JSON with --json)
   wf show <task|step|run>              details of one task, step or run
   wf watch <task|step|run>             attach to a run's terminal, or print its last screen
   wf pause|resume|stop <task>          pause, resume or stop a task
@@ -147,7 +147,7 @@ export async function main(argv: string[]): Promise<number> {
     if (cmd === "serve") return await serveCmd(spec);
     if (cmd === "report") return await reportCmd(rest);
     if (cmd === "approve") return await approveCmd(rest);
-    if (cmd === "status") return emit(await control.status());
+    if (cmd === "status") return emit(await control.status(rest.includes("--json")));
     if (cmd === "show") return emit(await control.show(rest[0]));
     if (cmd === "watch") return emit(await control.watch(spec, rest[0]));
     if (cmd === "tell") return emit(await control.tell(rest[0], rest.slice(1).join(" ")));

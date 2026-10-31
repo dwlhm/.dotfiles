@@ -35,10 +35,66 @@ function text(r: Reply, label: string): Result {
   return r.ok ? { code: 0, out: String(r.text ?? "") } : failed(`wf ${label}: ${r.error}`);
 }
 
-/** `wf status`: every open task with its progress and the runs in flight. */
-export async function status(a: Ask = ask): Promise<Result> {
-  return text(await a({ op: "status" }), "status");
+function isJsonFlag(v: unknown): boolean {
+  return v === true || v === "json" || v === "true" ||
+    (typeof v === "object" && v !== null && ((v as { json?: unknown }).json === true || (v as { json?: unknown }).json === "json" || (v as { json?: unknown }).json === "true" || (v as { format?: unknown }).format === "json"));
 }
+
+function parseStatusText(text: string): { tasks: Array<{ id: string; command: string; status: string; goal: string; done: number; total: number; runs: Array<{ id: string; runner: string; model: string; terminal: string | null; taken: boolean }> }> } | null {
+  const trimmed = text.trim();
+  if (trimmed === "" || trimmed === "no open tasks") return { tasks: [] };
+  const tasks: Array<{ id: string; command: string; status: string; goal: string; done: number; total: number; runs: Array<{ id: string; runner: string; model: string; terminal: string | null; taken: boolean }> }> = [];
+  let current: (typeof tasks)[number] | null = null;
+  for (const line of trimmed.split("\n")) {
+    const m = line.match(/^(\S+) (\S+) (\S+): (.*) \((\d+)\/(\d+)\)$/);
+    if (m) {
+      current = { id: m[1], command: m[2], status: m[3], goal: m[4], done: Number(m[5]), total: Number(m[6]), runs: [] };
+      tasks.push(current);
+      continue;
+    }
+    const r = line.match(/^\s+(\S+) (\S+)·(\S+) (.*)$/);
+    if (r && current) {
+      const rest = r[4];
+      const taken = /\(taken\)/.test(rest);
+      const terminal = rest.replace(/\s*\(taken\)\s*$/, "").trim() || null;
+      current.runs.push({ id: r[1], runner: r[2], model: r[3], terminal, taken });
+    }
+  }
+  return tasks.length ? { tasks } : null;
+}
+
+/** `wf status`: every open task with its progress and the runs in flight. */
+export async function status(a: Ask | boolean | { json?: unknown; format?: unknown } = ask, jsonOption?: boolean | string | { json?: unknown; format?: unknown }): Promise<Result> {
+  let askFn: Ask = ask;
+  let wantJson = false;
+  if (typeof a === "function") {
+    askFn = a as Ask;
+    wantJson = isJsonFlag(jsonOption);
+  } else {
+    wantJson = isJsonFlag(a);
+    askFn = ask;
+  }
+  const r = await askFn(wantJson ? { op: "status", json: true } : { op: "status" });
+  if (!r.ok) return failed(`wf status: ${r.error}`);
+  if (wantJson) {
+    const data = (r.data ?? r.json ?? r.result ?? (typeof r.tasks !== "undefined" ? { tasks: r.tasks } : null)) as { tasks?: unknown } | null;
+    let payload = data && typeof data === "object" && "tasks" in (data as object) ? data : null;
+    if (!payload && typeof r.text === "string") payload = parseStatusText(r.text);
+    if (!payload) payload = { tasks: [] };
+    return { code: 0, out: JSON.stringify(payload) };
+  }
+  return text(r, "status");
+}
+
+export async function statusJson(...args: unknown[]): Promise<Result> {
+  // Force JSON mode regardless of args.
+  if (args.length === 0 || typeof args[0] !== "function") {
+    return status(true, ...args);
+  }
+  return status(args[0] as Ask, true);
+}
+
+export const statusJSON = statusJson;
 
 /** `wf show <what>`: a task's step tree, a step with its runs, or one run and its artifacts. */
 export async function show(what: string | undefined, a: Ask = ask): Promise<Result> {

@@ -111,6 +111,7 @@ export async function serve(d: Deps, path: string): Promise<Running> {
   await claim(path);
   const e = new Engine(d);
   await e.recover();
+  e.announce(true); // once at start, whatever the recovered aggregate is
   let stopping = false;
   const server = listen(e, path, () => {
     d.log("quitting: a newer wf asked to take over");

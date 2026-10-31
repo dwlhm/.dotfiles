@@ -8,6 +8,7 @@ import { terminalName } from "./host";
 import type { Task, Step, Run } from "./records";
 import { choices, type Choice } from "./runners";
 import { runId } from "./ids";
+import { aggregate, encode } from "./osc";
 import { wfEnv } from "./paths";
 import { resolveTarget } from "./targets";
 import { available, edits, enoughInput, laterWith, needs, planSteps, resultOf, why, type Finished } from "./plans";
@@ -30,11 +31,24 @@ export class Engine {
   /** Open tasks (running, waiting for approval, blocked): what approve and tell act on. */
   readonly tasks = new Map<string, Task>();
   private waiters = new Map<string, ((r: Result) => void)[]>();
+  /** The last status sequence written, so an unchanged aggregate is not written again. */
+  private reported = "";
 
   constructor(readonly d: Deps) {}
 
   private stamp = () => this.d.now().toISOString().replace(/\.\d{3}Z$/, "Z");
   private cmd = (task: Task) => this.d.spec.commands.get(task.command)!;
+
+  /** Tell the host the aggregate over open tasks; `force` also writes it unchanged (start). */
+  announce(force = false): void {
+    const text = encode(aggregate(this.tasks.values()));
+    if (!force && text === this.reported) return;
+    this.reported = text;
+    const write = this.d.write;
+    if (write) return write(text);
+    // Only a terminal reads it: a piped engine (tests, redirects) must stay plain text.
+    if (process.stdout.isTTY) process.stdout.write(text);
+  }
 
   async submit(s: Submit): Promise<Task> {
     const cmd = this.d.spec.commands.get(s.command);
@@ -67,8 +81,14 @@ export class Engine {
     return choices(role, this.d.runners, this.d.spec.vocab.tiers, only);
   }
 
-  /** Start every step whose inputs are ready; close the task when nothing is left to run. */
+  /** Start every step whose inputs are ready, then report the aggregate that may have changed. */
   advance(task: Task): void {
+    this.plan(task);
+    this.announce();
+  }
+
+  /** Dispatch whatever is ready; close the task when nothing is left to run. */
+  private plan(task: Task): void {
     // A paused or unapproved task dispatches nothing new; its runs are still reconciled.
     if (task.status === "paused" || task.status === "awaiting_approval" || task.status === "stopped") return void this.d.store.save(task);
     const work = workSteps(this, task);
@@ -213,6 +233,7 @@ export class Engine {
     if (typeof to === "string") void this.d.host.send(to, `<wf from="${task.id}" status="${status}">\n${text.trim()}\n</wf>`).catch(() => {});
     for (const w of this.waiters.get(task.id) ?? []) w({ task, text: text.trim() });
     this.waiters.delete(task.id);
+    this.announce();
   }
 
   /** Resolves when the task leaves `running` (done, failed or blocked), with its result text. */
