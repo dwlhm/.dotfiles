@@ -30,6 +30,7 @@ test("args: mistakes are explained, never guessed", () => {
   expect(() => parse(["ask"])).toThrow(/what should 'ask' do\? e\.g\. wf ask "why is the build slow\?"/);
   expect(() => parse(["ask", "about", "x"])).toThrow(UsageError);
   expect(() => parse(["ask", "q", "only", "src"])).toThrow(/'only' is not an option of 'ask' \(options: in, about, with, report-to\)/);
+  expect(() => parse(["review", "PR", "#42"])).toThrow(/Quote it with what comes before: wf review "PR #42"/);
   expect(() => parse(["ask", "q", "about"])).toThrow(/'about' needs one or more paths/);
   expect(() => parse(["ask", "q", "about", "a", "about", "b"])).toThrow(/given twice/);
   expect(() => parse(["ask", "q", "report-to", "me"])).toThrow(/only inside an hc terminal/);

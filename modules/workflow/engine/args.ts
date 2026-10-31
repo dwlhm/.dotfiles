@@ -40,7 +40,8 @@ export function parseCommand(spec: Spec, argv: string[], cwd: string, env: Recor
   while (i < rest.length) {
     const word = rest[i].replace(/^--/, "");
     if (!cmd.options.includes(word)) {
-      throw new UsageError(`'${rest[i]}' is not an option of '${name}' (options: ${cmd.options.join(", ")}). Quote text that contains spaces.`);
+      const hint = rest[i].startsWith("#") ? ` Quote it with what comes before: wf ${name} "${goal} ${rest[i]}"` : " Quote text that contains spaces.";
+      throw new UsageError(`'${rest[i]}' is not an option of '${name}' (options: ${cmd.options.join(", ")}).${hint}`);
     }
     if (word in options) throw new UsageError(`'${word}' is given twice`);
     let j = i + 1;

@@ -25,7 +25,7 @@ async function handle(e: Engine, req: Request): Promise<Record<string, unknown>>
     return { ok: true };
   }
   if (req.op === "submit") {
-    const task = e.submit(req.submit);
+    const task = await e.submit(req.submit);
     if (!req.wait) return { ok: true, task: task.id };
     const r = await e.wait(task);
     return { ok: true, task: r.task.id, status: r.task.status, text: r.text };

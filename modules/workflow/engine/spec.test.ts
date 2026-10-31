@@ -66,7 +66,7 @@ test("commands must point at real roles, results and options", () => {
   edit("commands.md", "roles: [review]", "roles: [reviewer]");
   edit("commands.md", "result: answer", "result: essay");
   edit("commands.md", "options: [in, with, report-to]", "options: [in, wiht, report-to]");
-  edit("commands.md", "example: review PR #42", "example: look at PR #42");
+  edit("commands.md", `example: 'review "PR #42"'`, "example: look at PR 42");
   const msg = errorsOf();
   expect(msg).toMatch(/commands\.review: roles: unknown 'reviewer'/);
   expect(msg).toMatch(/commands\.ask: result: unknown 'essay'/);

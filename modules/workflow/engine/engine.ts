@@ -13,7 +13,8 @@ import { choices, type Choice, type Runner } from "./runners";
 import { renderPrompt } from "./prompt";
 import { runId } from "./ids";
 import { wfEnv } from "./paths";
-import { available, enoughInput, laterWith, planSteps, resultOf, varsFor, why, type Finished } from "./plans";
+import { resolveTarget, type Exec } from "./targets";
+import { available, enoughInput, laterWith, needs, planSteps, resultOf, varsFor, why, type Finished } from "./plans";
 
 export type Deps = {
   spec: Spec;
@@ -24,12 +25,24 @@ export type Deps = {
   state: string;
   now: () => Date;
   log: (line: string) => void;
+  /** Runs git and gh for resolving review targets (a fake in tests). */
+  exec?: Exec;
 };
 export type Active = { task: Task; step: Step; run: Run; working: boolean; nudged: number };
 export type Result = { task: Task; text: string };
 export type Submit = { command: string; goal: string; folder: string; options: Record<string, unknown> };
 
 const ENDED = ["done", "failed", "stopped"];
+
+/** Per-task runtime files (`<state>/tasks/<id>/`): inputs that must not go into the record. */
+function writeState(state: string, id: string, name: string, text: string): void {
+  mkdirSync(join(state, "tasks", id), { recursive: true });
+  writeFileSync(join(state, "tasks", id, name), text);
+}
+function readState(state: string, id: string, name: string): string | undefined {
+  const f = join(state, "tasks", id, name);
+  return existsSync(f) ? readFileSync(f, "utf8") : undefined;
+}
 const firstLine = (t: string) => (t.trim().split("\n")[0] ?? "").slice(0, 200);
 
 export class Engine {
@@ -41,13 +54,17 @@ export class Engine {
   private stamp = () => this.d.now().toISOString().replace(/\.\d{3}Z$/, "Z");
   private cmd = (task: Task) => this.d.spec.commands.get(task.command)!;
 
-  submit(s: Submit): Task {
+  async submit(s: Submit): Promise<Task> {
     const cmd = this.d.spec.commands.get(s.command);
     if (!cmd) throw new Error(`unknown command '${s.command}'`);
     if (!available(this.d.spec, cmd)) throw new Error(`'${s.command}' is not available yet`);
     const wanted = (s.options.with as string[] | undefined) ?? [];
+    const target = needs(this.d.spec, cmd, "target") ? await resolveTarget(s.goal, s.folder, this.d.exec) : undefined;
+    if (target) s = { ...s, options: { ...s.options, target_label: target.label } };
     const steps = planSteps(this.d.spec, this.d.runners, cmd, this.d.store.peekId(), s.goal, wanted);
     const id = this.d.store.nextId();
+    // A PR's diff is third-party and can be large: runtime state, never the brain record.
+    if (target) writeState(this.d.state, id, "target.md", target.text);
     const task: Task = { id, command: s.command, goal: s.goal, folder: s.folder, options: s.options, status: "running", created: this.stamp(), closed: null, steps, answers: [] };
     this.d.store.save(task, `# ${s.goal}`);
     void this.d.store.commit(task);
@@ -99,7 +116,14 @@ export class Engine {
     const role = this.d.spec.roles.get(step.role)!;
     const id = runId(step.id, step.runs.length + 1);
     const context = this.d.knowledge.context({ folder: task.folder, paths: (task.options.about as string[]) ?? [], goal: task.goal, budget: this.d.spec.policy.limits.context_bytes });
-    const prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars: varsFor(task, this.finished(task, step.deps)), context, run: id, multiline: next.runner.multiline });
+    let prompt: string;
+    try {
+      const vars = varsFor(task, this.finished(task, step.deps), readState(this.d.state, task.id, "target.md"));
+      prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars, context, run: id, multiline: next.runner.multiline });
+    } catch (e) {
+      step.status = "failed";
+      return void this.d.log(`${step.id} failed: cannot build its prompt: ${(e as Error).message}`);
+    }
     const run: Run = { id, runner: next.runner.name, model: next.model.id, terminal: null, started: this.stamp(), ended: null, outcome: null };
     step.runs.push(run);
     step.status = "running";

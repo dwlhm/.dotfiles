@@ -8,9 +8,12 @@ import { stepId } from "./ids";
 import type { Vars } from "./prompt";
 
 /** The prompt variables the engine can fill so far; a role needing others is not runnable yet. */
-export const SUPPLIED = ["question", "goal", "about", "answers"];
+export const SUPPLIED = ["question", "goal", "about", "answers", "target"];
 /** How many agents `compare` asks when the user names none. */
 export const MANY_DEFAULT = 3;
+
+/** Whether any role of the command needs the prompt variable `v`. */
+export const needs = (spec: Spec, c: Command, v: string): boolean => c.roles.some((r) => spec.roles.get(r)!.needs.includes(v));
 
 export const available = (spec: Spec, c: Command): boolean =>
   c.roles.every((r) => spec.roles.get(r)!.needs.every((n) => SUPPLIED.includes(n)));
@@ -26,7 +29,7 @@ function agentsFor(spec: Spec, runners: Map<string, Runner>, cmd: Command, wante
     if (!eligible.includes(name)) throw new Error(`${name} cannot do '${cmd.name}' (it needs: ${role.can.join(", ")})`);
   }
   if (!cmd.many) {
-    if (!eligible.length) throw new Error(`no agent can do '${cmd.name}' (it needs: ${role.can.join(", ")})`);
+    if (!eligible.length) throw new Error(`no agent can do '${cmd.name}' (it needs: ${role.can.join(", ")}, tier ${role.tier}+)`);
     return [];
   }
   const agents = wanted.length ? wanted : eligible.slice(0, MANY_DEFAULT);
@@ -56,9 +59,11 @@ export function planSteps(spec: Spec, runners: Map<string, Runner>, cmd: Command
 /** `with` names the agents of the first stage; for a `many` command the later stages pick freely. */
 export const laterWith = (cmd: Command, wanted: string[]): string[] => (cmd.many ? [] : wanted);
 
-export function varsFor(task: Task, finished: Finished[]): Vars {
+/** `target` is the resolved review target (kept in runtime state, never in the record). */
+export function varsFor(task: Task, finished: Finished[], target?: string): Vars {
   const answers = finished.map((f) => `### ${f.agent}\n${f.text.trim()}`).join("\n\n");
-  return { question: task.goal, goal: task.goal, about: (task.options.about as string[] | undefined) ?? ["the whole folder"], answers };
+  const about = (task.options.about as string[] | undefined) ?? ["the whole folder"];
+  return { question: task.goal, goal: task.goal, about, answers, ...(target === undefined ? {} : { target }) };
 }
 
 /** A later stage runs only on enough input: one finished step, or two for a `many` comparison. */

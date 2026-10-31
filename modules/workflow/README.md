@@ -13,9 +13,16 @@ never depends on Luvus, and Luvus never depends on it.
 |---|---|---|
 | `fix` | `fix "login error when the password is empty" in ~/komerce/admin-v2` | patch |
 | `build` | `build "dark mode toggle in settings"` | patch, plan shown first when large |
-| `review` | `review PR #42` · `review feat/x` · `review my changes` · `review src/auth/` | notes |
+| `review` | `review "PR #42"` · `review feat/x` · `review "my changes"` · `review src/auth/` | notes |
 | `ask` | `ask "why is the build slow?" about src/build/` | answer |
 | `compare` | `compare "best cache design for X" with claude opencode agy` | report |
+
+`review` targets are resolved by the engine before any agent starts (`engine/targets.ts`):
+`"my changes"` / `perubahanku` (uncommitted), a branch (against the default branch), a path inside
+the work folder, or `"PR #42"` / a PR URL. For a PR the engine runs `gh` and hands the reviewer the
+title, body and diff (capped) fenced as untrusted data the content cannot close; the reviewer
+only reads, needs no network and no gh, and the repo is never changed. The resolved target text
+lives in `~/.local/state/wf/tasks/<id>/target.md`; the record keeps only its label.
 
 Options are plain words with one concrete argument (`in`, `only`, `check`, `with`, `about`,
 `ask-first`, `just-go`, `no-merge`, `report-to`). Internal names (role, tier, policy) never show

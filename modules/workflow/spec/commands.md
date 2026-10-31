@@ -14,7 +14,7 @@ commands:
     options: [in, only, check, with, ask-first, just-go, no-merge, report-to]
   review:
     about: Review a PR, a branch, your uncommitted changes or a path, without editing
-    example: review PR #42
+    example: 'review "PR #42"'
     roles: [review]
     result: notes
     options: [in, with, report-to]

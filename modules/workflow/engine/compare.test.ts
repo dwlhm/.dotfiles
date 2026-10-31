@@ -12,7 +12,7 @@ const runOf = (k: Awaited<ReturnType<typeof makeEngine>>, step: string) => [...k
 
 test("compare: one step per agent in parallel, then a summary over every answer", async () => {
   const k = await makeEngine({ runners: three });
-  const task = k.engine.submit(compare({ with: ["c", "a"] }));
+  const task = await k.engine.submit(compare({ with: ["c", "a"] }));
   const waiting = k.engine.wait(task);
   await settle();
   expect(task.steps.map((s) => [s.id, s.role, s.with?.[0] ?? null, s.deps])).toEqual([
@@ -39,7 +39,7 @@ test("compare: one step per agent in parallel, then a summary over every answer"
 
 test("compare: an agent that cannot answer drops out; with one answer left there is no summary", async () => {
   const k = await makeEngine({ runners: three });
-  const task = k.engine.submit(compare({ with: ["a", "b"] }));
+  const task = await k.engine.submit(compare({ with: ["a", "b"] }));
   const waiting = k.engine.wait(task);
   await settle();
   await k.engine.report(runOf(k, "w1.1"), "question", "Which workload?");
@@ -53,7 +53,7 @@ test("compare: an agent that cannot answer drops out; with one answer left there
 
 test("compare: infra falls back inside the same agent only; nobody answering fails the task", async () => {
   const k = await makeEngine({ runners: three });
-  const task = k.engine.submit(compare({ with: ["a", "b"] }));
+  const task = await k.engine.submit(compare({ with: ["a", "b"] }));
   const waiting = k.engine.wait(task);
   await settle();
   k.host.set("t1", { state: "finished", exit: 1 });
@@ -71,14 +71,14 @@ test("compare: infra falls back inside the same agent only; nobody answering fai
 
 test("compare: defaults to three distinct agents; needs two; refuses unknown or unable agents up front", async () => {
   const k = await makeEngine({ runners: three });
-  const task = k.engine.submit(compare());
+  const task = await k.engine.submit(compare());
   expect(task.steps.filter((s) => s.role === "research").map((s) => s.with)).toEqual([["a"], ["b"], ["c"]]);
-  expect(() => k.engine.submit(compare({ with: ["a"] }))).toThrow(/needs at least two agents/);
-  expect(() => k.engine.submit(compare({ with: ["a", "zz"] }))).toThrow(/unknown agent 'zz'/);
+  await expect(k.engine.submit(compare({ with: ["a"] }))).rejects.toThrow(/needs at least two agents/);
+  await expect(k.engine.submit(compare({ with: ["a", "zz"] }))).rejects.toThrow(/unknown agent 'zz'/);
   const nobodyMedium = await makeEngine({ runners: [fakeRunner("a", ["a1"]), fakeRunner("b", ["b1"])] });
-  expect(() => nobodyMedium.engine.submit(compare())).toThrow(/no agent can do the summarize stage of 'compare' \(it needs: read, shell-report, tier medium\+\)/);
+  await expect(nobodyMedium.engine.submit(compare())).rejects.toThrow(/no agent can do the summarize stage of 'compare' \(it needs: read, shell-report, tier medium\+\)/);
   const ro = await makeEngine({ runners: [fakeRunner("a", ["a1"]), fakeRunner("ro", ["r"], { enforces: ["read", "shell-report"] }), d] });
-  expect(() => ro.engine.submit(compare({ with: ["a", "ro"] }))).toThrow(/ro cannot do 'compare'/);
-  const picked = ro.engine.submit(compare()).steps.filter((s) => s.role === "research").map((s) => s.with?.[0]);
+  await expect(ro.engine.submit(compare({ with: ["a", "ro"] }))).rejects.toThrow(/ro cannot do 'compare'/);
+  const picked = (await ro.engine.submit(compare())).steps.filter((s) => s.role === "research").map((s) => s.with?.[0]);
   expect(picked).toEqual(["a", "d"]); // ro cannot research, so it is never picked
 });
