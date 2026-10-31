@@ -18,6 +18,8 @@ limits:
   steps_per_level: 8
   retries_per_tier: 2
   context_bytes: 24000
+  start_seconds: 120
+  run_minutes: 20
 integration_branch: wf/integration
 ---
 
@@ -31,4 +33,7 @@ reason when it breaks one of them.
 - `retries_per_tier`: quality failures (check `fail`) retry on the same tier this often, then move
   up one tier; `infra` moves to the next eligible runner at once.
 - `context_bytes`: the most private knowledge injected into one run's prompt.
+- `start_seconds`: a run that has not started working by then is an `infra` failure; statuses
+  before it first works (a sign-in or trust notice, an idle prompt) are startup noise.
+- `run_minutes`: a run still working after this is stopped as an `infra` failure.
 - The integration branch is merged into `main` only on the user's command.

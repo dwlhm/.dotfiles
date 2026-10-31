@@ -44,10 +44,19 @@ up in what the user types. The source of truth is `spec/commands.md`.
 
 ### Runner adapter contract
 
-Each runner answers six things: `launch` (how the first prompt is passed), `trust <cwd>`,
-`permissions <capabilities>`, `status_filter` (status noise to ignore), `models` (tier and cost)
-and `enforces` (capabilities it can enforce; a runner is eligible for a role only when it
-enforces all of the role's `can`). Fallback order is derived, never written by hand.
+`runner.md` states the facts: `enforces` (capabilities it can enforce; a runner is eligible for a
+role only when it enforces all of the role's `can`), `trust` and `models` (tier and cost).
+`runner.ts` exports `launch(model, prompt, can, check) → { argv, env }` (first prompt and
+permissions), plus `trust(cwd)` when `trust: true` and an optional `noise(status)` filter. The
+fallback order is derived (cheapest eligible tier first), never written by hand; a retry or
+fallback is a new run.
+
+### Host adapter contract
+
+`spawn(name, cwd, argv, env, labels)`, `get`, `waitChildren`, `snapshot`, `close`, `send`. The hc
+host prefixes argv with `env(1)` because hc terminals do not inherit the caller's environment;
+the engine passes its own location (`WF_*`) so a worker's `wf report` reaches it. Status is only
+what the program reports (OSC 7501): a run has started once it was seen `working`.
 
 ### Knowledge adapter contract
 
@@ -76,6 +85,13 @@ terminal → pid. wf owns task, step and run (`engine/records.ts`); hc owns term
 processes (`hc get`), which wf only references. A run's terminal carries the hc label
 `wf.run=<run id>`, so the link works both ways. A retry or fallback is a new run, so the history
 of why an earlier run failed is kept.
+
+## The engine process
+
+`wf serve` is one long-lived hc terminal (`wf` for the default state, `wf-<hash>` for another
+`WF_STATE`); any `wf <command>` starts it when nothing answers on `~/.local/state/wf/wf.sock`
+(concurrent clients share one). Workers are its children and die with it; on restart, runs left
+open become `infra` and their step moves on. `wf report` never starts an engine.
 
 ## Checks
 

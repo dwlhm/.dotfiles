@@ -8,7 +8,7 @@ import { loadCommands, type Command, type Option } from "./commands";
 
 export type Vocab = {
   capabilities: Set<string>;
-  outcomes: Map<string, "agent" | "engine">;
+  outcomes: Map<string, { by: "agent" | "engine"; about: string }>;
   tiers: string[];
   results: Set<string>;
   predicates: Set<string>;
@@ -39,11 +39,12 @@ export const ENGINE_VARS = ["context"];
 const keys = (c: Check, doc: Doc, field: string) => new Set(Object.keys(c.map(doc.data, field) ?? {}));
 
 function loadVocab(doc: Doc, c: Check): Vocab {
-  const outcomes = new Map<string, "agent" | "engine">();
+  const outcomes: Vocab["outcomes"] = new Map();
   for (const [name, v] of Object.entries(c.map(doc.data, "outcomes") ?? {})) {
-    const by = (v as Record<string, unknown>)?.by;
-    if (by !== "agent" && by !== "engine") c.fail(`outcomes.${name}.by`, "must be agent or engine");
-    else outcomes.set(name, by);
+    const o = (v ?? {}) as Record<string, unknown>;
+    const about = new Check(`${c.file}: outcomes.${name}`, c.errors).text(o, "about") ?? "";
+    if (o.by !== "agent" && o.by !== "engine") c.fail(`outcomes.${name}.by`, "must be agent or engine");
+    else outcomes.set(name, { by: o.by, about });
   }
   const tiers = (c.list(doc.data, "tiers") ?? []).filter((t): t is string => typeof t === "string");
   return {
@@ -60,7 +61,7 @@ function loadRole(doc: Doc, vocab: Vocab): { role: Role; errors: string[] } {
   const c = new Check(doc.file);
   const d = doc.data;
   const reports = c.names(d, "reports", vocab.outcomes.keys());
-  for (const r of reports) if (vocab.outcomes.get(r) === "engine") c.fail("reports", `'${r}' is reported by the engine, never by an agent`);
+  for (const r of reports) if (vocab.outcomes.get(r)?.by === "engine") c.fail("reports", `'${r}' is reported by the engine, never by an agent`);
   const can = c.names(d, "can", vocab.capabilities);
   if (!can.includes("shell-report")) c.fail("can", "every role needs shell-report to hand back its outcome");
   const needs = c.words(d, "needs");

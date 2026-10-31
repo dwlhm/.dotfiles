@@ -1,12 +1,14 @@
 { pkgs, lib, ... }:
 
 let
-  # Runtime files only: tests stay in the repo.
+  # Runtime files only: tests and their kit stay in the repo.
+  runtime = f: f.hasExt "md" || (f.hasExt "ts" && !lib.hasSuffix ".test.ts" f.name && f.name != "testkit.ts");
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
       ./spec
-      (lib.fileset.fileFilter (f: f.hasExt "ts" && !lib.hasSuffix ".test.ts" f.name) ./engine)
+      (lib.fileset.fileFilter runtime ./engine)
+      (lib.fileset.fileFilter runtime ./adapters)
     ];
   };
 

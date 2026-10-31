@@ -1,51 +1,104 @@
 // wf: the workflow engine's command line.
 import { join } from "node:path";
-import { loadSpec } from "./spec";
+import { loadSpec, type Spec } from "./spec";
 import { readDoc, SpecError } from "./frontmatter";
 import { checkTask } from "./records";
-
-const HELP = `wf — multi-agent workflow engine
-
-  wf lint                 check the spec (roles, policy, commands, vocab)
-  wf lint <record.md>…    check task records against the spec
-
-Spec folder: $WF_SPEC, else the one shipped with wf.`;
+import { loadRunners } from "./runners";
+import { parseCommand, UsageError } from "./args";
+import { call, request, NotRunning } from "./client";
+import { available } from "./engine";
+import { brainRoot, socketPath, stateDir } from "./paths";
 
 export const specDir = (): string => process.env.WF_SPEC || join(import.meta.dir, "..", "spec");
 
-function lint(files: string[]): number {
-  const spec = loadSpec(specDir());
+/** Exit codes: 0 done · 1 failed or error · 2 usage · 3 needs you. */
+const EXIT = { done: 0, failed: 1, blocked: 3 } as Record<string, number>;
+
+function help(spec: Spec): string {
+  const live = [...spec.commands.values()].filter(available);
+  return `wf — multi-agent workflow engine
+
+${live.map((c) => `  wf ${c.example.padEnd(46)} ${c.about}`).join("\n")}
+
+  options: ${live.flatMap((c) => c.options).filter((o, i, a) => a.indexOf(o) === i).join(", ")}
+
+  wf report <run> <outcome> ["text"]   for workers: hand back a run's outcome (text or stdin)
+  wf serve                             the engine itself (started on demand as hc terminal 'wf')
+  wf lint [<record.md>…]               check the spec, adapters and task records`;
+}
+
+async function lint(spec: Spec, files: string[]): Promise<number> {
+  const runners = await loadRunners(spec);
   const errors = files.flatMap((f) => {
     try {
-      const doc = readDoc(f);
-      return checkTask(f, doc.data, spec);
+      return checkTask(f, readDoc(f).data, spec);
     } catch (e) {
       return [e instanceof SpecError ? e.message : `${f}: ${(e as Error).message}`];
     }
   });
-  if (errors.length) {
-    console.error(errors.join("\n"));
-    return 1;
-  }
-  console.log(files.length ? `ok: ${files.length} record(s) valid` : `ok: spec valid (${spec.roles.size} roles, ${spec.commands.size} commands)`);
+  if (errors.length) return console.error(errors.join("\n")), 1;
+  console.log(files.length ? `ok: ${files.length} record(s) valid` : `ok: spec valid (${spec.roles.size} roles, ${spec.commands.size} commands, ${runners.size} runners)`);
   return 0;
 }
 
-export function main(argv: string[]): number {
+async function serveCmd(spec: Spec): Promise<number> {
+  const { serve } = await import("./server");
+  const { Store } = await import("./store");
+  const { herdrHost } = await import("../adapters/host/herdr/host");
+  const { brainKnowledge } = await import("../adapters/knowledge/brain/knowledge");
+  const log = (line: string) => console.log(`${new Date().toTimeString().slice(0, 8)}  ${line}`);
+  const root = brainRoot();
+  const deps = { spec, runners: await loadRunners(spec), host: herdrHost, store: new Store(root, spec), knowledge: brainKnowledge(root), state: stateDir(), now: () => new Date(), log };
+  const running = await serve(deps, socketPath());
+  const quit = () => void running.stop().then(() => process.exit(0));
+  process.on("SIGTERM", quit);
+  process.on("SIGINT", quit);
+  await running.done;
+  return 0;
+}
+
+async function reportCmd(rest: string[]): Promise<number> {
+  const [run, outcome, ...words] = rest;
+  if (!run || !outcome) throw new UsageError('usage: wf report <run> <outcome> ["text"]  (or text on stdin)');
+  const text = words.length ? words.join(" ") : process.stdin.isTTY ? "" : await Bun.stdin.text();
+  // Never start an engine for a report: a worker belongs to the engine that started it.
+  const r = await request({ op: "report", run, outcome, text }).catch((e: Error) => {
+    if (e instanceof NotRunning) throw new Error(`the engine that started ${run} is not reachable at ${socketPath()}`);
+    throw e;
+  });
+  if (!r.ok) return console.error(`wf report: ${r.error}`), 1;
+  console.log(`ok: ${run} ${outcome} handed back`);
+  return 0;
+}
+
+async function submitCmd(spec: Spec, argv: string[]): Promise<number> {
+  if (!available(spec.commands.get(argv[0])!)) throw new UsageError(`'${argv[0]}' is not available yet`);
+  const submit = parseCommand(spec, argv, process.cwd(), process.env);
+  const to = submit.options["report-to"];
+  const r = await call({ op: "submit", submit, wait: !to });
+  if (!r.ok) return console.error(`wf ${argv[0]}: ${r.error}`), 1;
+  if (to) return console.log(`${r.task} started; the result goes to ${to}`), 0;
+  console.log(`${r.task} ${r.status}\n\n${r.text}`);
+  return EXIT[String(r.status)] ?? 1;
+}
+
+export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   try {
-    if (cmd === "lint") return lint(rest);
-    if (cmd === undefined || cmd === "help" || cmd === "--help" || cmd === "-h") {
-      console.log(HELP);
-      return cmd === undefined ? 2 : 0;
-    }
-    console.error(`wf: unknown command '${cmd}'\n\n${HELP}`);
+    const spec = loadSpec(specDir());
+    if (cmd === "lint") return await lint(spec, rest);
+    if (cmd === "serve") return await serveCmd(spec);
+    if (cmd === "report") return await reportCmd(rest);
+    if (cmd && spec.commands.has(cmd)) return await submitCmd(spec, argv);
+    if (cmd === undefined || ["help", "--help", "-h"].includes(cmd)) return console.log(help(spec)), cmd === undefined ? 2 : 0;
+    console.error(`wf: unknown command '${cmd}'\n\n${help(spec)}`);
     return 2;
   } catch (e) {
-    if (!(e instanceof SpecError)) throw e;
-    console.error(`wf: the spec is invalid:\n${e.message}`);
+    if (e instanceof UsageError) return console.error(`wf: ${e.message}`), 2;
+    if (e instanceof SpecError) return console.error(`wf: the spec is invalid:\n${e.message}`), 1;
+    console.error(`wf: ${(e as Error).message}`);
     return 1;
   }
 }
 
-if (import.meta.main) process.exit(main(process.argv.slice(2)));
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));
