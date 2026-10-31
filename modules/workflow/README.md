@@ -158,6 +158,25 @@ refuses a dirty working tree or an integration branch with nothing new, else run
 lists the files. This is the only command that changes the user's branch, and only when they run
 it.
 
+## Herdr host (contract)
+
+- **The engine is visible.** When the client starts `wf serve` (`engine/client.ts`), the hc
+  terminal gets the labels `herdr.space=<engine name>` and `herdr.tab=<engine name>` (`wf`, or
+  `wf-<hash>` for another `WF_STATE`). Herdr makes a new space and tab for ids it does not know,
+  so the engine shows as its own space, and its workers (its hc children) show under it in
+  Herdr's agents list. The labels are what the host adapter (`adapters/host/herdr/`) decides;
+  the engine core only asks it for them.
+- **The engine reports its own status** with OSC 7501 on its stdout, the same channel agents use:
+  `ESC ] 7501 ; state=<s>:app=wf:title=<base64 "wf">:msg=<base64 msg> ESC \`, plus `kind=question`
+  when blocked. `<s>` is the most urgent over open tasks: `blocked` when any task is blocked or
+  awaiting approval (msg: e.g. `w7 waits for approval`), else `working` when any task runs
+  (msg: e.g. `2 tasks running`), else `idle` (msg: `no open tasks`). It is emitted when that
+  aggregate changes, and once at start. Encoding lives in one pure function with tests
+  (`engine/osc.ts`: `aggregate(tasks) → { state, kind?, msg }` and `encode(report) → string`).
+- **`wf status --json`** prints the status op's data as JSON for programs (the board):
+  `{ tasks: [{ id, command, status, goal, done, total, runs: [{ id, runner, model, terminal,
+  taken }] }] }`. The text form stays as it is.
+
 ## Where things live
 
 | Place | Holds |
