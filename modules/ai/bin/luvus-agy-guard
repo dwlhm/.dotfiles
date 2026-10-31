@@ -8,7 +8,8 @@
 set -eu
 
 input=$(cat)
-[ "${LUVUS_WORKER:-}" = 1 ] || { echo '{}'; exit 0; }
+# Inert means no output: agy treats any JSON without a decision (even `{}`) as deny.
+[ "${LUVUS_WORKER:-}" = 1 ] || exit 0
 
 name=$(printf '%s' "$input" | jq -r '.toolCall.name // empty')
 
