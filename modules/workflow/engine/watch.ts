@@ -13,7 +13,8 @@ async function check(e: Engine, a: Active, now: number): Promise<void> {
   const { limits } = e.d.spec.policy;
   if (!a.run.terminal) return; // still spawning
   const t = await e.d.host.get(a.run.terminal);
-  const age = (now - Date.parse(a.run.started)) / 1000;
+  // `give back` restarts the clock; before that, limits count from when the run started.
+  const age = (now - (a.limitsFrom ?? Date.parse(a.run.started))) / 1000;
   if (t.state !== "live") return e.finish(a, "infra", `the agent exited (code ${t.exit ?? "?"}) without reporting`);
   const runner = e.d.runners.get(a.run.runner);
   const s = t.status;
@@ -49,6 +50,7 @@ async function check(e: Engine, a: Active, now: number): Promise<void> {
 export async function reconcile(e: Engine): Promise<void> {
   const now = e.d.now().getTime();
   for (const a of [...e.active.values()]) {
+    if (a.taken) continue; // the user drives it until `give back`
     try {
       await check(e, a, now);
     } catch (err) {
