@@ -21,6 +21,9 @@ let
       runHook preCheck
       ${pkgs.stdenv.shellDryRun} "$target"
       HOME="$TMPDIR" ${pkgs.bun}/bin/bun ${src}/engine/cli.ts lint
+      # Bundling resolves every static import: a module missing from the package fails here,
+      # not later when `wf serve` first starts.
+      HOME="$TMPDIR" ${pkgs.bun}/bin/bun build --target=bun --outdir "$TMPDIR/wf-bundle" ${src}/engine/cli.ts ${src}/engine/server.ts >/dev/null
       runHook postCheck
     '';
   };
