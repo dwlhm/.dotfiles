@@ -5,7 +5,8 @@ import { dirname } from "node:path";
 import type { Socket } from "bun";
 import { Engine } from "./engine";
 import type { Deps } from "./types";
-import { approve, tell } from "./build";
+import { approve } from "./build";
+import { giveBack, pause, resume, show, status, stop as stopTask, take, tell as tellTask } from "./control";
 import { watch } from "./watch";
 import { request } from "./client";
 import { VERSION } from "./paths";
@@ -16,7 +17,10 @@ export type Request =
   | { op: "submit"; submit: import("./engine").Submit; wait: boolean }
   | { op: "report"; run: string; outcome: string; text: string }
   | { op: "approve"; task: string }
-  | { op: "tell"; task: string; text: string };
+  | { op: "tell"; task: string; text: string }
+  | { op: "status" }
+  | { op: "show"; what: string }
+  | { op: "pause" | "resume" | "stop" | "take" | "giveback"; what: string };
 
 async function handle(e: Engine, req: Request): Promise<Record<string, unknown>> {
   if (req.op === "ping") return { ok: true, active: e.active.size, version: VERSION };
@@ -28,13 +32,25 @@ async function handle(e: Engine, req: Request): Promise<Record<string, unknown>>
     await e.report(req.run, req.outcome, req.text);
     return { ok: true };
   }
-  if (req.op === "approve" || req.op === "tell") {
+  if (req.op === "approve") {
     const task = e.tasks.get(req.task);
     if (!task) throw new Error(`no open task ${req.task}`);
-    if (req.op === "approve") approve(e, task);
-    else tell(e, task, req.text);
+    approve(e, task);
     const r = await e.wait(task);
     return { ok: true, task: r.task.id, status: r.task.status, text: r.text };
+  }
+  if (req.op === "tell") {
+    const told = await tellTask(e, req.task, req.text);
+    // A plan being changed runs again: wait for what it produces. A running task is told and left.
+    if (!told.wait) return { ok: true, task: told.task.id, status: told.task.status, text: told.text };
+    const r = await e.wait(told.task);
+    return { ok: true, task: r.task.id, status: r.task.status, text: r.text };
+  }
+  if (req.op === "status") return { ok: true, text: status(e) };
+  if (req.op === "show") return { ok: true, text: show(e, req.what) };
+  if (req.op === "pause" || req.op === "resume" || req.op === "stop" || req.op === "take" || req.op === "giveback") {
+    const op = { pause, resume, stop: stopTask, take, giveback: giveBack }[req.op];
+    return { ok: true, text: await op(e, req.what) };
   }
   if (req.op === "submit") {
     const task = await e.submit(req.submit);

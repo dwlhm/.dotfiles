@@ -30,6 +30,8 @@ export class Engine {
   /** Open tasks (running, waiting for approval, blocked): what approve and tell act on. */
   readonly tasks = new Map<string, Task>();
   private waiters = new Map<string, ((r: Result) => void)[]>();
+  /** Private context per run, kept in memory until the run ends and is saved with it. */
+  private contexts = new Map<string, string>();
 
   constructor(readonly d: Deps) {}
 
@@ -81,6 +83,8 @@ export class Engine {
 
   /** Start every step whose inputs are ready; close the task when nothing is left to run. */
   advance(task: Task): void {
+    // A paused or unapproved task dispatches nothing new; its runs are still reconciled.
+    if (task.status === "paused" || task.status === "awaiting_approval" || task.status === "stopped") return void this.d.store.save(task);
     const work = workSteps(this, task);
     const workDone = work.length > 0 && work.every((s) => ended(s) !== null);
     if (task.status === "running" && workDone) nextMilestone(this, task);
@@ -129,9 +133,9 @@ export class Engine {
     const run: Run = { id, runner: next.runner.name, model: next.model.id, terminal: null, started: this.stamp(), ended: null, outcome: null };
     step.runs.push(run);
     step.status = "running";
-    // What private context this run saw: the leak check compares the patch against it.
-    mkdirSync(join(this.d.state, "runs", id), { recursive: true });
-    writeFileSync(join(this.d.state, "runs", id, "context.md"), context);
+    // What private context this run saw: the leak check compares the patch against it. It is saved
+    // with the run when it ends, so a run still in flight has no artifacts yet.
+    this.contexts.set(id, context);
     this.active.set(id, { task, step, run, working: false, nudged: 0 });
     void this.spawn(this.active.get(id)!, next, prompt);
   }
@@ -157,9 +161,19 @@ export class Engine {
     }
   }
 
+  /** Save the private context a run was given as its `context.md`, once the run has ended. */
+  saveContext(runId: string, dir: string): void {
+    const context = this.contexts.get(runId);
+    if (context !== undefined) writeFileSync(join(dir, "context.md"), context);
+    this.contexts.delete(runId);
+  }
+
   /** End a run and its step for a reason no other runner would change. */
   private abandon(a: Active, reason: string): void {
     this.active.delete(a.run.id);
+    const dir = join(this.d.state, "runs", a.run.id);
+    mkdirSync(dir, { recursive: true });
+    this.saveContext(a.run.id, dir);
     Object.assign(a.run, { ended: this.stamp(), outcome: "infra", summary: firstLine(reason) });
     a.step.status = "failed";
     this.d.log(`${a.step.id} failed: ${reason}`);
@@ -181,6 +195,7 @@ export class Engine {
     if (!this.active.delete(a.run.id)) return;
     const dir = join(this.d.state, "runs", a.run.id);
     mkdirSync(dir, { recursive: true });
+    this.saveContext(a.run.id, dir);
     if (a.run.terminal) {
       writeFileSync(join(dir, "screen.txt"), await this.d.host.snapshot(a.run.terminal, 200).catch(() => ""));
       await this.d.host.close(a.run.terminal).catch(() => {});
@@ -207,14 +222,14 @@ export class Engine {
     this.advance(task);
   }
 
-  close(task: Task, status: "done" | "failed" | "blocked" | "awaiting_approval", text: string, waiting?: Step): void {
+  close(task: Task, status: "done" | "failed" | "blocked" | "stopped" | "awaiting_approval", text: string, waiting?: Step): void {
     if (waiting) waiting.status = "paused";
     task.status = status;
-    const final = status === "done" || status === "failed";
+    const final = status === "done" || status === "failed" || status === "stopped";
     task.closed = final ? this.stamp() : null;
     if (final) this.tasks.delete(task.id);
     const approval = `Plan — approve it: wf approve ${task.id} · change it: wf tell ${task.id} "…"`;
-    const title = { done: this.cmd(task).many ? "Report" : "Answer", failed: "Failed", blocked: "Needs you", awaiting_approval: approval }[status];
+    const title = { done: this.cmd(task).many ? "Report" : "Answer", failed: "Failed", blocked: "Needs you", stopped: "Stopped", awaiting_approval: approval }[status];
     this.d.store.save(task, `# ${task.goal}\n\n## ${title}\n\n${text.trim()}`);
     void this.d.store.commit(task);
     this.d.log(`${task.id} ${status}`);
