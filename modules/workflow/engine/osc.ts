@@ -2,6 +2,7 @@
 // board sees one wf terminal instead of guessing. One pure aggregate, one pure encoder.
 import type { Task } from "./records";
 import type { Report } from "./types";
+import type { Engine } from "./engine";
 
 export type { Report };
 
@@ -30,4 +31,14 @@ export function aggregate(tasks: Iterable<Task>): Report {
 export function encode(report: Report): string {
   const kind = report.kind ? `:kind=${report.kind}` : "";
   return `\x1b]7501;state=${report.state}:app=${NAME}:title=${base64(NAME)}:msg=${base64(report.msg)}${kind}\x1b\\`;
+}
+
+/** Tell the host the aggregate over the engine's open tasks; `force` writes it unchanged too (start). */
+export function announce(e: Engine, force = false): void {
+  const text = encode(aggregate(e.tasks.values()));
+  if (!force && text === e.reported) return;
+  e.reported = text;
+  if (e.d.write) return e.d.write(text);
+  // Only a terminal reads it: a piped engine (tests, redirects) must stay plain text.
+  if (process.stdout.isTTY) process.stdout.write(text);
 }

@@ -14,6 +14,8 @@ export interface Host {
   snapshot(address: string, lines: number): Promise<string>;
   /** End and forget the terminal. */
   close(address: string): Promise<void>;
+  /** Show the engine itself to the person (name its place on screen); once at start, best effort. */
+  present?(engine: string): Promise<void>;
   /** Type `text` into another terminal (a `report-to` target). */
   send(address: string, text: string): Promise<void>;
 }

@@ -159,3 +159,27 @@ test("claude: only the role's tools exist, unlisted calls are denied, trust is r
   expect(claude.trusted("/srv", cfg)).toBe(false);
   expect(claude.trusted("/srv/app", join(tmpdir(), "missing.json"))).toBe(false);
 });
+
+test("herdr host: the engine's place is renamed; the board is made once, then selected", async () => {
+  const { presentEngine, openBoard } = await import("../adapters/host/herdr/host");
+  const calls: string[] = [];
+  let tabs = [{ id: "wf", name: "engine" }];
+  const app = async (args: string[]) => {
+    calls.push(args.join(" "));
+    if (args[0] === "ls") return { code: 0, out: JSON.stringify({ spaces: [{ id: "wf", tabs }] }) };
+    if (args[1] === "tab.new") tabs = [...tabs, { id: "tb2", name: "board" }];
+    return { code: 0, out: "{}" };
+  };
+  let shown = false; // Herdr shows the engine's tab only after a moment
+  const late = async (args: string[]) => (args[0] === "ls" && !shown ? ((shown = true), { code: 0, out: JSON.stringify({ spaces: [] }) }) : app(args));
+  expect(await presentEngine("wf", late, async () => {})).toBe(true);
+  expect(calls).toEqual(["ls", "do space.rename --id wf --name wf", "do tab.rename --id wf --name engine"]);
+  expect(await presentEngine("wf", async () => ({ code: 1, out: "" }), async () => {})).toBe(false);
+  calls.length = 0;
+  expect(await openBoard("wf", app)).toBe("board open in the wf space");
+  expect(calls.at(-1)).toBe("do tab.new --space wf --mod wf-board --name board");
+  await openBoard("wf", app);
+  expect(calls.at(-1)).toBe("do tab.select --id tb2"); // the second time: no new tab
+  expect(await openBoard("wf", async () => ({ code: 1, out: "" }))).toMatch(/Herdr is not running/);
+  expect(await openBoard("wf-x", app)).toMatch(/no space in Herdr yet/);
+});

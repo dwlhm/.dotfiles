@@ -1,5 +1,6 @@
 // `wf serve`: the long-lived engine, run as an hc terminal. One JSON request line per connection
 // on a unix socket; one JSON reply line. Workers are its children, so they end with it.
+import { announce } from "./osc";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Socket } from "bun";
@@ -9,7 +10,7 @@ import { approve } from "./build";
 import { giveBack, pause, resume, show, status, stop as stopTask, take, tell as tellTask } from "./control";
 import { watch } from "./watch";
 import { request } from "./client";
-import { VERSION } from "./paths";
+import { VERSION, engineName } from "./paths";
 
 export type Request =
   | { op: "ping" }
@@ -111,7 +112,8 @@ export async function serve(d: Deps, path: string): Promise<Running> {
   await claim(path);
   const e = new Engine(d);
   await e.recover();
-  e.announce(true); // once at start, whatever the recovered aggregate is
+  announce(e, true); // once at start, whatever the recovered aggregate is
+  void d.host.present?.(engineName()).catch(() => {});
   let stopping = false;
   const server = listen(e, path, () => {
     d.log("quitting: a newer wf asked to take over");

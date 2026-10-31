@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Engine } from "./engine";
 import type { Run, Step, Task } from "./records";
 import { select, type Picked } from "./select";
+import { announce } from "./osc";
 import { flat } from "./steps";
 import { workSteps, tell as tellPlan } from "./build";
 
@@ -112,6 +113,7 @@ export function pause(e: Engine, what: string): string {
   const task = taskFor(e, what, "pause");
   if (task.status !== "running") throw new Error(`${task.id} is ${task.status}, not running`);
   task.status = "paused";
+  announce(e);
   e.d.store.save(task);
   void e.d.store.commit(task);
   e.d.log(`${task.id} paused`);

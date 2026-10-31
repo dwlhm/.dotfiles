@@ -173,6 +173,12 @@ it.
   (msg: e.g. `2 tasks running`), else `idle` (msg: `no open tasks`). It is emitted when that
   aggregate changes, and once at start. Encoding lives in one pure function with tests
   (`engine/osc.ts`: `aggregate(tasks) → { state, kind?, msg }` and `encode(report) → string`).
+- **The engine's place** is named once it shows: space `wf`, tab `engine` (`Host.present`, best
+  effort, waiting for Herdr to show the tab). Renaming never moves the person's view.
+- **The board** (`adapters/host/herdr/board/`, a Herdr mod copied into
+  `~/.config/herdr-app/mods/wf-board` by the Nix module, since Herdr writes into mod folders) lists
+  open tasks, their runs (click: peek at the terminal) and approve / pause / resume / stop. It opens
+  only on request, as a tab in the engine's space: `wf board` (a new tab takes the view).
 - **`wf status --json`** prints the status op's data as JSON for programs (the board):
   `{ tasks: [{ id, command, status, goal, done, total, runs: [{ id, runner, model, terminal,
   taken }] }] }`. The text form stays as it is.

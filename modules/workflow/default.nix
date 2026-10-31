@@ -33,6 +33,18 @@ in
   # runtime state in ~/.local/state/wf.
   home.packages = [ wf ];
 
+  # The wf board mod for Herdr (adapters/host/herdr/board). Herdr writes into every mod folder
+  # (jsconfig.json, type files), so the files are copied in, not linked to the read-only store;
+  # only our two files are touched.
+  home.activation.wfBoardMod = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    herdr="${config.home.homeDirectory}/.config/herdr-app"
+    if [ -d "$herdr" ]; then
+      run mkdir -p "$herdr/mods/wf-board"
+      run install -m 644 ${./adapters/host/herdr/board/main.js} "$herdr/mods/wf-board/main.js"
+      run install -m 644 ${./adapters/host/herdr/board/mod.json} "$herdr/mods/wf-board/mod.json"
+    fi
+  '';
+
   # agy's only strict enforcement is a PreToolUse hook (adapters/runners/agy). hooks.json is shared
   # with other integrations, so merge our "wf-worker" key instead of owning the file. The hook is
   # silent outside wf runs.

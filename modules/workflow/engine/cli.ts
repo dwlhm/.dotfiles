@@ -7,7 +7,8 @@ import { adaptersDir, loadRunners, type RunnerCode } from "./runners";
 import { parseCommand, UsageError } from "./args";
 import { call, request, NotRunning } from "./client";
 import { available } from "./plans";
-import { VERSION, brainRoot, socketPath, stateDir } from "./paths";
+import { VERSION, brainRoot, engineName, socketPath, stateDir } from "./paths";
+import { openBoard } from "../adapters/host/herdr/host";
 import * as control from "./control-cli";
 import { EXIT } from "./control-cli";
 
@@ -32,6 +33,7 @@ ${live.map((c) => `  wf ${c.example.padEnd(width)}  ${c.about}`).join("\n")}
   wf take <step|run>                   drive a run yourself (the engine stops checking it)
   wf give back <step|run>              give a taken run back to the engine
   wf merge [in <folder>]               merge wf/integration into your current branch
+  wf board                             open the wf board in Herdr (the engine's space)
   wf serve                             the engine itself (started on demand as hc terminal 'wf')
   wf hook <runner>                     a runner's tool hook (registered by the Nix module)
   wf lint [<record.md>…]               check the spec, adapters and task records`;
@@ -157,6 +159,7 @@ export async function main(argv: string[]): Promise<number> {
       return emit(await control.control("giveback", rest[1]));
     }
     if (cmd === "merge") return emit(await control.merge(spec, rest));
+    if (cmd === "board") return console.log(await openBoard(engineName())), 0;
     if (cmd && spec.commands.has(cmd)) return await submitCmd(spec, argv);
     if (cmd === undefined || ["help", "--help", "-h"].includes(cmd)) return console.log(help(spec)), cmd === undefined ? 2 : 0;
     console.error(`wf: unknown command '${cmd}'\n\n${help(spec)}`);

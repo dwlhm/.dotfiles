@@ -5,7 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Task } from "./records";
-import { aggregate, encode } from "./osc";
+import { aggregate, announce, encode } from "./osc";
 import { makeEngine, settle } from "./testkit";
 import { reconcile } from "./watch";
 import { serve } from "./server";
@@ -66,19 +66,19 @@ test("the engine writes its status at start and again only when the aggregate ch
   const out: string[] = [];
   k.engine.d.write = (s) => out.push(s);
 
-  k.engine.announce(true); // start
+  announce(k.engine, true); // start
   expect(out).toEqual([encode({ state: "idle", msg: "no open tasks" })]);
-  k.engine.announce(true); // a restarted engine reports once more
+  announce(k.engine, true); // a restarted engine reports once more
   expect(out).toHaveLength(2);
 
   const t = await k.engine.submit(ask);
   await settle();
   expect(out.at(-1)).toBe(encode({ state: "working", msg: "1 task running" }));
-  k.engine.announce(); // nothing changed: nothing written
+  announce(k.engine); // nothing changed: nothing written
   expect(out).toHaveLength(3);
 
   t.status = "blocked";
-  k.engine.announce();
+  announce(k.engine);
   expect(out.at(-1)).toBe(encode({ state: "blocked", kind: "question", msg: "w1 is blocked" }));
 
   t.status = "running";
@@ -118,4 +118,15 @@ test("serve reports at start and follows a task from running to closed", async (
   await request({ op: "report", run: "w1.1-r1", outcome: "done", text: "42" }, path);
   expect(out.at(-1)).toBe(encode({ state: "idle", msg: "no open tasks" }));
   await running.stop();
+});
+
+test("pausing a task is announced at once", async () => {
+  const { pause } = await import("./control");
+  const k = await makeEngine();
+  const out: string[] = [];
+  k.engine.d.write = (s) => out.push(s);
+  await k.engine.submit(ask);
+  await settle();
+  pause(k.engine, "w1");
+  expect(out.at(-1)).toBe(encode({ state: "idle", msg: "1 task paused" }));
 });
