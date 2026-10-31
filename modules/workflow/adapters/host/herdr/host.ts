@@ -16,6 +16,9 @@ async function hc(args: string[], allowFail = false): Promise<string> {
   return r.out;
 }
 
+/** The engine's own space and tab: Herdr makes them for ids it does not know yet. */
+export const engineLabels = (name: string): Record<string, string> => ({ "herdr.space": name, "herdr.tab": name });
+
 export const herdrHost: Host = {
   // hc terminals do not inherit the caller's environment and `hc run` has no env flag.
   async spawn({ name, cwd, argv, env, labels }) {
