@@ -71,6 +71,14 @@ test("statuses before the first 'working' are startup noise until start_seconds 
   await settle();
   expect(k.engine.active.size).toBe(0);
   expect(k.logs.join("\n")).toMatch(/w1\.1-r1 infra: did not start working within/);
+  // A runner that states a tighter start limit is given up on sooner.
+  const quick = await makeEngine({ runners: [fakeRunner("oc", ["only"], { startSeconds: 30 })] });
+  await quick.engine.submit(ask);
+  await settle();
+  quick.clock.t += 31_000;
+  await reconcile(quick.engine);
+  await settle();
+  expect(quick.logs.join("\n")).toMatch(/infra: did not start working within 30s/);
 });
 
 test("a worker that goes idle without reporting gets one reminder, then counts as infra", async () => {

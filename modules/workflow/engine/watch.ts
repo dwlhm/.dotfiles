@@ -21,7 +21,8 @@ async function check(e: Engine, a: Active, now: number): Promise<void> {
     a.nudged = 0;
   }
   if (!a.working) {
-    if (age > limits.start_seconds) await e.finish(a, "infra", `did not start working within ${limits.start_seconds}s`);
+    const start = Math.min(limits.start_seconds, runner?.startSeconds ?? Infinity);
+    if (age > start) await e.finish(a, "infra", `did not start working within ${start}s`);
     return;
   }
   if (age > limits.run_minutes * 60) return e.finish(a, "infra", `still working after ${limits.run_minutes} minutes`);

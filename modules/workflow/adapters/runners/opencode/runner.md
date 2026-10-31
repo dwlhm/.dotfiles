@@ -3,6 +3,7 @@ name: opencode
 enforces: [read, edit, shell-report, shell-check, shell-git-read, shell-qa, network]
 multiline: true
 trust: false
+start_seconds: 30
 models:
   - id: opencode/deepseek-v4.1-flash-free
     tier: small
@@ -14,6 +15,10 @@ models:
 
 OpenCode TUI (`opencode --standalone --prompt`), verified under hc 2026-10-31: reports OSC 7501
 itself (`app: opencode`), needs no folder trust, and starts working on the prompt at once.
+
+`start_seconds: 30`: it normally starts within 1–2 s. Intermittently (seen 3 times on 2026-10-31,
+never reproduced in isolation) the TUI opens with the prompt filled in but never sends it; it
+then sits idle, so a short start limit hands the step to the next runner quickly.
 
 `--standalone` is required: without it every TUI attaches to one shared background service, so
 two runs started together both ran with the first one's model and permissions and neither got

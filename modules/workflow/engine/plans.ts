@@ -6,9 +6,10 @@ import type { Step, Task } from "./records";
 import { choices, type Runner } from "./runners";
 import { stepId } from "./ids";
 import type { Vars } from "./prompt";
+import { actions } from "./rules";
 
 /** The prompt variables the engine can fill so far; a role needing others is not runnable yet. */
-export const SUPPLIED = ["question", "goal", "about", "answers", "target", "brief", "only", "check"];
+export const SUPPLIED = ["question", "goal", "about", "answers", "target", "brief", "only", "check", "evidence"];
 /** Roles whose output the engine cannot turn into work yet (a plan becomes steps in `build`). */
 export const NOT_YET = ["plan"];
 /** How many agents `compare` asks when the user names none. */
@@ -58,25 +59,37 @@ export function planSteps(spec: Spec, runners: Map<string, Runner>, cmd: Command
   const first = agents.length ? agents.map((a, i) => step(i + 1, cmd.roles[0], `${goal} (${a})`, [], a)) : [step(1, cmd.roles[0], goal, [])];
   const out = [...first];
   for (const role of cmd.roles.slice(1)) out.push(step(out.length + 1, role, `${role}: ${goal}`, out.slice(-first.length).map((s) => s.id)));
+  // Policy: after patch work lands, the knowledge-writing role records what it proved.
+  const curator = [...spec.roles.values()].find((r) => r.writes === "knowledge");
+  if (curator && actions(spec, { edits_code: false, touches_ui: false, result_patch: cmd.result === "patch", large_task: false }).has("curate_facts")) {
+    out.push(step(out.length + 1, curator.name, `curate: ${goal}`, out.map((s) => s.id)));
+  }
   return out;
 }
 
 /** `with` names the agents of the first stage; for a `many` command the later stages pick freely. */
 export const laterWith = (cmd: Command, wanted: string[]): string[] => (cmd.many ? [] : wanted);
 
-/** `target` is the resolved review target (kept in runtime state, never in the record). */
-export function varsFor(task: Task, finished: Finished[], target?: string, step?: Step): Vars {
+/** `target`: the resolved review target, `evidence`: what the work proved (both from runtime state). */
+export function varsFor(task: Task, finished: Finished[], target?: string, step?: Step, evidence?: string): Vars {
   const answers = finished.map((f) => `### ${f.agent}\n${f.text.trim()}`).join("\n\n");
   const about = (task.options.about as string[] | undefined) ?? ["the whole folder"];
   const patch = step?.check ? { brief: task.goal, only: step.only.length ? step.only : ["any file in the repository"], check: step.check } : {};
-  return { question: task.goal, goal: task.goal, about, answers, ...patch, ...(target === undefined ? {} : { target }) };
+  const extra = { ...(target === undefined ? {} : { target }), ...(evidence === undefined ? {} : { evidence }) };
+  return { question: task.goal, goal: task.goal, about, answers, ...patch, ...extra };
 }
 
 /** A later stage runs only on enough input: one finished step, or two for a `many` comparison. */
 export const enoughInput = (cmd: Command, finished: Finished[]): boolean => finished.length >= (cmd.many ? 2 : 1);
 
 /** The result: the last stage's text, with each agent's answer under it for a `many` command. */
-export function resultOf(cmd: Command, steps: Step[], finished: Map<string, Finished>): { status: "done" | "failed"; text: string } {
+export function resultOf(cmd: Command, all: Step[], finished: Map<string, Finished>, after: Set<string> = new Set()): { status: "done" | "failed"; text: string } {
+  const r = workResult(cmd, all.filter((s) => !after.has(s.role)), finished);
+  const notes = all.filter((s) => after.has(s.role)).map((s) => finished.get(s.id)?.text.trim()).filter(Boolean);
+  return notes.length && r.status === "done" ? { ...r, text: [r.text, ...notes].join("\n\n") } : r;
+}
+
+function workResult(cmd: Command, steps: Step[], finished: Map<string, Finished>): { status: "done" | "failed"; text: string } {
   const last = steps[steps.length - 1];
   const lastDone = finished.get(last.id);
   if (!cmd.many) return lastDone ? { status: "done", text: lastDone.text.trim() } : { status: "failed", text: why(last) };

@@ -30,7 +30,8 @@ export type RunnerCode = {
 
 export type Model = { id: string; tier: string; cost: number };
 /** `multiline`: whether the CLI runs a shell command spanning several lines (heredocs, quoted newlines). */
-export type Runner = { name: string; enforces: string[]; multiline: boolean; trust: boolean; models: Model[]; code: RunnerCode };
+/** `startSeconds`: how soon this CLI normally starts working (tighter than the policy's limit). */
+export type Runner = { name: string; enforces: string[]; multiline: boolean; trust: boolean; startSeconds?: number; models: Model[]; code: RunnerCode };
 export type Choice = { runner: Runner; model: Model };
 
 export const adaptersDir = (): string => process.env.WF_ADAPTERS || join(import.meta.dir, "..", "adapters");
@@ -62,7 +63,8 @@ async function loadRunner(dir: string, spec: Spec, errors: string[]): Promise<Ru
   const code = (await import(codeFile)) as RunnerCode;
   if (typeof code.launch !== "function") c.fail("runner.ts", "must export launch()");
   if (trust && typeof code.trust !== "function") c.fail("runner.ts", "trust: true needs an exported trust()");
-  return { name, enforces, multiline, trust, models, code };
+  const startSeconds = doc.data.start_seconds === undefined ? undefined : c.int(doc.data, "start_seconds", 1);
+  return { name, enforces, multiline, trust, ...(startSeconds ? { startSeconds } : {}), models, code };
 }
 
 export async function loadRunners(spec: Spec, root = adaptersDir()): Promise<Map<string, Runner>> {

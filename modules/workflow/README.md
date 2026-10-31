@@ -39,6 +39,14 @@ index and current branch are never touched; `wf/integration` reaches their branc
 command. Claude Code must trust the worktree folder once (open `claude` in
 `~/.local/state/wf/worktrees` and accept); until then claude runs fall back to other runners.
 
+After patch work lands, policy `curate_facts` adds the knowledge-writing role (`curate`,
+`after: true`, `writes: knowledge`): it gets the evidence (each step's result and why earlier
+runs failed) and reports `nothing` or lines `project: …` / `topic <name>: …`. The engine appends
+them, with date and source run, to `## Verified facts (wf)` in the project's brain file or to
+`knowledge/<topic>.md` (a new topic is registered in the index), skipping duplicates, in one
+commit touching only those files. Nothing else in the brain is ever edited, decisions are never
+recorded, and a curator that fails never fails the task.
+
 Options are plain words with one concrete argument (`in`, `only`, `check`, `with`, `about`,
 `ask-first`, `just-go`, `no-merge`, `report-to`). Internal names (role, tier, policy) never show
 up in what the user types. The source of truth is `spec/commands.md`.

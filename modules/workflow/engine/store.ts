@@ -75,7 +75,7 @@ export class Store {
     const run = async () => {
       if (content === undefined || !existsSync(join(this.root, ".git"))) return;
       try {
-        await commitSnapshot(this.root, relative(this.root, file), content, label);
+        await commitSnapshot(this.root, [{ rel: relative(this.root, file), content }], label);
       } catch (e) {
         console.error(`wf: brain commit of ${task.id} failed: ${(e as Error).message}`);
       }

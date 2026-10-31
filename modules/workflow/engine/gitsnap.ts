@@ -23,15 +23,19 @@ async function must(root: string, args: string[], o?: { env?: Record<string, str
   return r.out;
 }
 
+type Blob = { rel: string; blob: string };
+
 /** One attempt; false when HEAD moved underneath (someone committed meanwhile). */
-async function attempt(root: string, rel: string, blob: string, message: string): Promise<boolean | "same"> {
+async function attempt(root: string, blobs: Blob[], message: string): Promise<boolean | "same"> {
   const head = (await git(root, ["rev-parse", "--verify", "-q", "HEAD"])).out;
-  if (head && (await git(root, ["rev-parse", "-q", "--verify", `HEAD:${rel}`])).out === blob) return "same";
+  const fresh = [];
+  for (const b of blobs) if (!head || (await git(root, ["rev-parse", "-q", "--verify", `HEAD:${b.rel}`])).out !== b.blob) fresh.push(b);
+  if (!fresh.length) return "same";
   const index = join(root, ".git", `wf-index-${process.pid}`);
   const env = { GIT_INDEX_FILE: index };
   try {
     await must(root, head ? ["read-tree", head] : ["read-tree", "--empty"], { env });
-    await must(root, ["update-index", "--add", "--cacheinfo", `100644,${blob},${rel}`], { env });
+    for (const b of fresh) await must(root, ["update-index", "--add", "--cacheinfo", `100644,${b.blob},${b.rel}`], { env });
     const tree = await must(root, ["write-tree"], { env });
     const commit = await must(root, ["commit-tree", tree, ...(head ? ["-p", head] : []), "-m", message]);
     const moved = await git(root, ["update-ref", "HEAD", commit, ...(head ? [head] : [])]);
@@ -41,15 +45,16 @@ async function attempt(root: string, rel: string, blob: string, message: string)
   }
 }
 
-/** Commit `content` as `rel` (relative to `root`). Returns false when it was already committed. */
-export async function commitSnapshot(root: string, rel: string, content: string, message: string): Promise<boolean> {
-  const blob = await must(root, ["hash-object", "-w", "--stdin"], { stdin: content });
+/** Commit each `content` as its `rel` (relative to `root`), in one commit. False when already committed. */
+export async function commitSnapshot(root: string, files: { rel: string; content: string }[], message: string): Promise<boolean> {
+  const blobs: Blob[] = [];
+  for (const f of files) blobs.push({ rel: f.rel, blob: await must(root, ["hash-object", "-w", "--stdin"], { stdin: f.content }) });
   for (let i = 0; i < 3; i++) {
-    const r = await attempt(root, rel, blob, message);
+    const r = await attempt(root, blobs, message);
     if (r === "same") return false;
     if (r) {
-      // Keep the user's index in step for this path only, so `git status` shows real changes.
-      await must(root, ["update-index", "--add", "--cacheinfo", `100644,${blob},${rel}`]);
+      // Keep the user's index in step for these paths only, so `git status` shows real changes.
+      for (const b of blobs) await must(root, ["update-index", "--add", "--cacheinfo", `100644,${b.blob},${b.rel}`]);
       return true;
     }
   }

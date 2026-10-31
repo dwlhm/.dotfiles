@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { brainLayout } from "../../../engine/brain";
 import { fit, score, sections, tokens, type Knowledge, type Section } from "../../../engine/knowledge";
+import { recordFacts } from "./record";
 
 /**
  * A knowledge section is included when it shares a word with the query itself and, counting a
@@ -36,6 +37,7 @@ export function projectFor(root: string, folder: string): string | null {
 export function brainKnowledge(root: string): Knowledge {
   const layout = brainLayout(root);
   return {
+    record: (facts, o) => recordFacts(root, projectFor(root, o.folder), facts, o),
     context({ folder, paths, goal, budget }) {
       const query = tokens([goal, ...paths, folder.split("/").pop() ?? ""].join(" "));
       const must: Section[] = [];

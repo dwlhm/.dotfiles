@@ -1,11 +1,17 @@
-// The knowledge contract (read side): private context for a run, chosen by the engine, never by
-// the agent. Sections are whole `##` sections with their source; the total stays within budget.
+// The knowledge contract. Read: private context for a run, chosen by the engine, never by the
+// agent, as whole `##` sections with their source, within budget. Write: verified facts only.
+
+import type { Fact } from "./facts";
 
 export type Section = { source: string; heading: string; text: string };
 export type ContextQuery = { folder: string; paths: string[]; goal: string; budget: number };
 
+export type Recorded = { applied: string[]; skipped: string[] };
+
 export interface Knowledge {
   context(q: ContextQuery): Section[];
+  /** Append verified technical facts with their source run; never edits anything else. */
+  record(facts: Fact[], o: { folder: string; source: string; date: string }): Promise<Recorded>;
 }
 
 const STOP = new Set(["the", "and", "for", "with", "this", "that", "from", "into", "what", "why", "how", "does", "are", "use", "not", "its"]);
@@ -53,4 +59,7 @@ export function fit(must: Section[], rest: Section[], budget: number): Section[]
   return out;
 }
 
-export const noKnowledge: Knowledge = { context: () => [] };
+export const noKnowledge: Knowledge = {
+  context: () => [],
+  record: async (facts) => ({ applied: [], skipped: facts.map((f) => `${f.text} (no knowledge base)`) }),
+};

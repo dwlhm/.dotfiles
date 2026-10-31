@@ -3,6 +3,7 @@ name: claude
 enforces: [read, edit, shell-report, shell-check, shell-git-read, shell-qa, network]
 multiline: true
 trust: true
+start_seconds: 60
 models:
   - id: claude-haiku-5-5
     tier: small

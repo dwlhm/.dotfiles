@@ -28,6 +28,12 @@ async function work(k: Awaited<ReturnType<typeof makeEngine>>, file: string, tex
   await until(() => k.engine.active.size > 0 && [...k.engine.active.values()].every((a) => a.run.terminal));
   writeFileSync(join(runOf(k).step.worktree!, file), text);
 }
+/** Act as the curator that runs after landed patch work (it has nothing to record here). */
+async function curate(k: Awaited<ReturnType<typeof makeEngine>>, report = "nothing"): Promise<void> {
+  const find = () => [...k.engine.active.values()].find((a) => a.step.role === "curate" && a.run.terminal);
+  await until(() => !!find());
+  await k.engine.report(find()!.run.id, "done", report);
+}
 /** Wait until run `n` of the first step has been started. */
 const started = (k: Awaited<ReturnType<typeof makeEngine>>, n: number) => until(() => k.host.spawned.length >= n);
 
@@ -44,9 +50,10 @@ test("fix: a worktree per step, the engine checks, commits and merges; the user'
   expect(k.host.spawned[0].argv.at(-1)).toContain(`Edit only these paths: src\nThe step is done when this passes: \`${CHECK}\``);
   await work(k, "src/a.ts", "export const a = 2;\n");
   await k.engine.report("w1.1-r1", "done", "set a to 2");
+  await curate(k);
   const r = await waiting;
   expect(r.task.status).toBe("done");
-  expect(r.text).toMatch(/^Changed src\/a\.ts \(commit \w+\); `grep -q 'a = 2' src\/a\.ts` passed\. Merged into wf\/integration \(\w+\)\.\n\nset a to 2$/);
+  expect(r.text).toMatch(/^Changed src\/a\.ts \(commit \w+\); `grep -q 'a = 2' src\/a\.ts` passed\. Merged into wf\/integration \(\w+\)\.\n\nset a to 2\n\nKnowledge: nothing new to record\.$/);
   expect(await sh(dir, "show", "wf/integration:src/a.ts")).toBe("export const a = 2;");
   expect(await sh(dir, "log", "-1", "--format=%s", "wf/integration")).toBe("wf w1.1: merge make a 2");
   expect(existsSync(step.worktree!)).toBe(false); // clean and merged: removed
@@ -120,6 +127,7 @@ test("fix: the patch may not copy private context; conflicts with integration ne
   writeFileSync(join(t1.steps[0].worktree!, "src/a.ts"), "export const a = 2;\n");
   writeFileSync(join(t2.steps[0].worktree!, "src/a.ts"), "export const a = 3;\n");
   await k2.engine.report("w1.1-r1", "done", "ok");
+  await curate(k2);
   await k2.engine.report("w2.1-r1", "done", "ok");
   const r = await w2;
   expect(t1.status).toBe("done");
@@ -141,6 +149,7 @@ test("fix: no-merge leaves the branch; the check is guessed only when unambiguou
   await settle();
   await work(k, "src/a.ts", "export const a = 2;\n");
   await k.engine.report("w1.1-r1", "done", "ok");
+  await curate(k);
   expect((await waiting).text).toMatch(/Left on branch wf\/w1\.1 \(.+\); not merged\./);
   expect(await sh(dir, "branch", "--list", "wf/integration")).toBe("");
 
@@ -169,6 +178,7 @@ test("fix: new work starts from the integration branch when it already holds the
   const w1 = k.engine.wait(first);
   await work(k, "src/a.ts", "export const a = 2;\n");
   await k.engine.report("w1.1-r1", "done", "ok");
+  await curate(k);
   await w1;
   const second = await k.engine.submit({ ...fix(dir), goal: "touch readme", options: { check: "grep -q 'a = 2' src/a.ts", only: ["README.md"] } });
   expect(second.options.base).toBe(await sh(dir, "rev-parse", "wf/integration")); // so a = 2 is already there
@@ -184,6 +194,7 @@ test("fix: when the user's branch and integration diverged, work starts from bot
   const w1 = k.engine.wait(first);
   await work(k, "src/a.ts", "export const a = 2;\n");
   await k.engine.report("w1.1-r1", "done", "ok");
+  await curate(k);
   await w1;
   writeFileSync(join(dir, "README.md"), "# user edit\n");
   await sh(dir, "commit", "-qam", "user work on main");
@@ -207,6 +218,7 @@ test("fix: merges where the integration branch is already checked out; refuses a
   const w = k.engine.wait(t);
   await work(k, "src/a.ts", "export const a = 2;\n");
   await k.engine.report("w1.1-r1", "done", "ok");
+  await curate(k);
   expect((await w).task.status).toBe("done");
   expect(readFileSync(join(elsewhere, "int", "src/a.ts"), "utf8")).toBe("export const a = 2;\n");
   writeFileSync(join(elsewhere, "int", "scratch.txt"), "user's\n");

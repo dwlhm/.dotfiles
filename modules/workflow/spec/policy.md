@@ -5,7 +5,7 @@ rules:
   - when: touches_ui
     then: [add_qa_step]
   - when: result_patch
-    then: [leak_check, merge_into_integration]
+    then: [leak_check, merge_into_integration, curate_facts]
   - when: large_task
     then: [require_approval]
 ui_globs:

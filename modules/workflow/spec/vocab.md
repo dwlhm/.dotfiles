@@ -44,6 +44,7 @@ actions:
   merge_into_integration: A passing result is merged into the integration branch
   leak_check: Block the merge when the diff copies private knowledge injected into the run
   require_approval: The user approves the plan before work starts
+  curate_facts: After the work lands, the knowledge-writing role records what it proved
 ---
 
 The closed vocabulary every other spec file uses. A name that is not listed here is an error, never

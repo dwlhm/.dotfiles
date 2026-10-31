@@ -132,8 +132,8 @@ test("gitsnap commits exactly the given content and leaves the user's staged wor
   await Bun.spawn(["git", "-C", root, "add", "mine.md"]).exited;
   mkdirSync(join(root, "tasks"));
   writeFileSync(join(root, "tasks/w1.md"), "newer on disk");
-  expect(await commitSnapshot(root, "tasks/w1.md", "milestone A", "m: A")).toBe(true);
-  expect(await commitSnapshot(root, "tasks/w1.md", "milestone A", "m: again")).toBe(false);
+  expect(await commitSnapshot(root, [{ rel: "tasks/w1.md", content: "milestone A" }], "m: A")).toBe(true);
+  expect(await commitSnapshot(root, [{ rel: "tasks/w1.md", content: "milestone A" }], "m: again")).toBe(false);
   expect(await git(root, "show", "HEAD:tasks/w1.md")).toBe("milestone A");
   expect(await git(root, "log", "--format=%s")).toBe("m: A\ninit");
   expect(await git(root, "diff", "--cached", "--name-only")).toBe("mine.md");

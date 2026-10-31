@@ -23,6 +23,10 @@ export type Role = {
   needs: string[];
   reports: string[];
   prompt: string;
+  /** Runs after the work and never decides the task's result (its failure is only noted). */
+  after: boolean;
+  /** `knowledge`: the engine records the role's report as knowledge entries. */
+  writes?: "knowledge";
 };
 
 export type Spec = {
@@ -77,6 +81,8 @@ function loadRole(doc: Doc, vocab: Vocab): { role: Role; errors: string[] } {
     needs,
     reports,
     prompt: doc.body,
+    after: c.flag(d, "after") ?? false,
+    ...(d.writes === undefined ? {} : { writes: c.oneOf(d, "writes", ["knowledge"]) as "knowledge" }),
   };
   return { role, errors: c.errors };
 }

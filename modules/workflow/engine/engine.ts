@@ -18,6 +18,7 @@ import type { Exec } from "./exec";
 import { available, edits, enoughInput, laterWith, needs, planSteps, resultOf, varsFor, why, type Finished } from "./plans";
 import { nextChoice } from "./retry";
 import { assignPatch, landStep, preparePatch, workdir } from "./patch";
+import { parseFacts } from "./facts";
 
 export type Deps = {
   spec: Spec;
@@ -86,6 +87,22 @@ export class Engine {
     return choices(role, this.d.runners, this.d.spec.vocab.tiers, only);
   }
 
+  /** What the given steps did: their results, and why earlier runs failed (where quirks show). */
+  evidence(task: Task, ids: string[]): string {
+    const report = (run: string) => {
+      const f = join(this.d.state, "runs", run, "report.md");
+      return existsSync(f) ? readFileSync(f, "utf8").trim().slice(0, 1500) : "";
+    };
+    return task.steps
+      .filter((s) => ids.includes(s.id))
+      .map((s) => {
+        const failed = s.runs.filter((r) => r.outcome === "fail" || r.outcome === "infra").map((r) => `- ${r.id} (${r.runner}·${r.model}) ${r.outcome}: ${report(r.id) || r.summary}`);
+        const done = [...s.runs].reverse().find((r) => r.outcome === "done");
+        return [`### ${s.id}: ${s.title} (${s.status})`, done ? report(done.id) : "", failed.length ? `Failed attempts:\n${failed.join("\n")}` : ""].filter(Boolean).join("\n\n");
+      })
+      .join("\n\n");
+  }
+
   /** Finished steps (of `ids`, else all) with their result text, read back from the run artifacts. */
   finished(task: Task, ids?: string[]): Finished[] {
     return task.steps
@@ -107,7 +124,8 @@ export class Engine {
     }
     if (task.steps.some((s) => s.status === "running" || s.status === "paused") || task.status !== "running") return void this.d.store.save(task);
     if (task.steps.some((s) => s.status === "queued")) return void this.d.store.save(task);
-    const r = resultOf(this.cmd(task), task.steps, new Map(this.finished(task).map((f) => [f.step.id, f])));
+    const after = new Set([...this.d.spec.roles.values()].filter((r) => r.after).map((r) => r.name));
+    const r = resultOf(this.cmd(task), task.steps, new Map(this.finished(task).map((f) => [f.step.id, f])), after);
     this.close(task, r.status, r.text);
   }
 
@@ -123,7 +141,8 @@ export class Engine {
     const context = this.d.knowledge.context({ folder: task.folder, paths: (task.options.about as string[]) ?? [], goal: task.goal, budget: this.d.spec.policy.limits.context_bytes });
     let prompt: string;
     try {
-      const vars = varsFor(task, this.finished(task, step.deps), readState(this.d.state, task.id, "target.md"), step);
+      const evidence = role.needs.includes("evidence") ? this.evidence(task, step.deps) : undefined;
+      const vars = varsFor(task, this.finished(task, step.deps), readState(this.d.state, task.id, "target.md"), step, evidence);
       const last = step.runs.at(-1);
       const feedback = last?.outcome === "fail" ? readFileSync(join(this.d.state, "runs", last.id, "report.md"), "utf8") : undefined;
       prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars, context, run: id, multiline: next.runner.multiline, feedback });
@@ -192,6 +211,8 @@ export class Engine {
     }
     const landed = outcome === "done" && a.step.worktree ? await landStep(this.d.spec, this.d.state, a.task, a.step, this.d.exec) : undefined;
     if (landed) ({ outcome, text } = landed.ok ? { outcome, text: `${landed.text}\n\n${text.trim()}` } : { outcome: landed.outcome, text: landed.reason });
+    const role = this.d.spec.roles.get(a.step.role)!;
+    if (outcome === "done" && role.writes === "knowledge") text = await this.recordKnowledge(a, text);
     writeFileSync(join(dir, "report.md"), text);
     Object.assign(a.run, { ended: this.stamp(), outcome: outcome === "blocked" ? "stuck" : outcome, summary: firstLine(text) });
     this.d.log(`${a.run.id} ${outcome}: ${firstLine(text)}`);
@@ -199,9 +220,24 @@ export class Engine {
     const cmd = this.cmd(task);
     if (outcome === "infra" || outcome === "fail") this.dispatch(task, step);
     else if (outcome === "done") step.status = "done";
-    else if (cmd.many && step.role === cmd.roles[0]) step.status = "failed"; // one agent drops out
+    else if ((cmd.many && step.role === cmd.roles[0]) || role.after) step.status = "failed"; // drops out, never blocks
     else return this.close(task, "blocked", text, step);
     this.advance(task);
+  }
+
+  /** A curator's report becomes knowledge entries; what happened is the step's result text. */
+  private async recordKnowledge(a: Active, report: string): Promise<string> {
+    const { facts, dropped } = parseFacts(report);
+    const unclear = dropped ? ` (${dropped} unclear line(s) ignored)` : "";
+    if (!facts.length) return `Knowledge: nothing new to record${unclear}.`;
+    try {
+      const r = await this.d.knowledge.record(facts, { folder: a.task.folder, source: a.run.id, date: this.stamp().slice(0, 10) });
+      const lines = [`Knowledge: recorded ${r.applied.length} fact(s)${unclear}.`, ...r.applied.map((x) => `- ${x}`)];
+      if (r.skipped.length) lines.push("Skipped:", ...r.skipped.map((x) => `- ${x}`));
+      return lines.join("\n");
+    } catch (e) {
+      return `Knowledge: not recorded (${(e as Error).message}).`;
+    }
   }
 
   close(task: Task, status: "done" | "failed" | "blocked", text: string, waiting?: Step): void {
