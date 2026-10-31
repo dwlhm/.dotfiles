@@ -192,3 +192,21 @@ test("a machine that slept moves run limits on instead of ending every run at wa
   expect(k.logs.join("\n")).toMatch(/the machine slept for about \d+ min; run limits moved on by that/);
   expect(k.logs.join("\n")).not.toMatch(/still working after/);
 });
+
+test("an engine recovers only the tasks it owns, never another state folder's", async () => {
+  const k = await makeEngine({ runners: [fakeRunner("oc", ["a", "b"])] });
+  const task = await k.engine.submit(ask);
+  await settle();
+  expect(task.options.engine).toBe(k.state);
+  const { Engine } = await import("./engine");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const other = new Engine({ ...k.engine.d, state: mkdtempSync(join(tmpdir(), "wf-other-")), store: new Store(k.brain, k.spec) });
+  await other.recover();
+  expect(other.tasks.size).toBe(0);
+  expect(other.active.size).toBe(0);
+  expect(k.logs.join("\n")).toMatch(/1 open task\(s\) belong to another engine; left alone/);
+  const owner = new Engine({ ...k.engine.d, store: new Store(k.brain, k.spec) });
+  await owner.recover();
+  expect(owner.tasks.has(task.id)).toBe(true);
+});

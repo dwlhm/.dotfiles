@@ -68,7 +68,7 @@ test("review: the resolved target goes into a read-only reviewer's prompt and th
   const k = await makeEngine({ runners: [fakeRunner("m", ["mm"], { models: [{ id: "mm", tier: "medium", cost: 0 }] })] });
   const task = await k.engine.submit({ command: "review", goal: "feat/x", folder: dir, options: {} });
   await settle();
-  expect(task.options).toEqual({ target_label: "branch feat/x" }); // the target text stays out of the record
+  expect(task.options).toEqual({ target_label: "branch feat/x", engine: k.state }); // the target text stays out of the record
   expect(readFileSync(join(k.state, "tasks", task.id, "target.md"), "utf8")).toContain("git diff main...feat/x");
   const prompt = k.host.spawned[0].argv.at(-1)!;
   expect(prompt).toContain("Review Branch feat/x against main");

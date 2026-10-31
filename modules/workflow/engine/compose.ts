@@ -7,6 +7,7 @@ import type { Step, Task } from "./records";
 import { renderPrompt } from "./prompt";
 import { varsFor } from "./plans";
 import { readState, takeState } from "./state";
+import { evidenceOf, finishedOf } from "./results";
 
 /** `context` is what the leak check later compares the patch against. */
 export type Composed = { prompt: string; context: string };
@@ -14,8 +15,8 @@ export type Composed = { prompt: string; context: string };
 export function compose(e: Engine, task: Task, step: Step, run: string, multiline: boolean): Composed {
   const role = e.d.spec.roles.get(step.role)!;
   const sections = e.d.knowledge.context({ folder: task.folder, paths: (task.options.about as string[]) ?? [], goal: task.goal, budget: e.d.spec.policy.limits.context_bytes });
-  const evidence = role.needs.includes("evidence") ? e.evidence(task, step.deps) : undefined;
-  const vars = varsFor(task, e.finished(task, step.deps), readState(e.d.state, task.id, "target.md"), step, evidence);
+  const evidence = role.needs.includes("evidence") ? evidenceOf(e.d.state, task, step.deps) : undefined;
+  const vars = varsFor(task, finishedOf(e.d.state, task, step.deps), readState(e.d.state, task.id, "target.md"), step, evidence);
   const last = step.runs.at(-1);
   const failed = last?.outcome === "fail" ? join(e.d.state, "runs", last.id, "report.md") : undefined;
   const feedback = failed && existsSync(failed) ? readFileSync(failed, "utf8") : role.writes === "plan" ? takeState(e.d.state, task.id, "feedback.md") : undefined;

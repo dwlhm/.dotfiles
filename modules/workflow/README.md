@@ -177,6 +177,14 @@ it.
   `{ tasks: [{ id, command, status, goal, done, total, runs: [{ id, runner, model, terminal,
   taken }] }] }`. The text form stays as it is.
 
+## Rules for this module's tests
+
+Tests never start real processes: no real `hc`, agent CLI or `wf serve`. Inject them (the
+engine takes a `Host` and an `Exec`; a client or adapter test passes its own runner function)
+and assert on the calls. A real engine started by a test outlives it and, sharing the brain,
+would act on real tasks. Every task records its owning engine (`options.engine`, its state
+folder) and an engine only recovers its own, but a leaked process is still a bug.
+
 ## Where things live
 
 | Place | Holds |
