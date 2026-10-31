@@ -57,6 +57,7 @@ export async function reconcile(e: Engine): Promise<void> {
       e.d.log(`${a.run.id} could not be checked: ${(err as Error).message}`);
     }
   }
+  e.announce(); // a run that started or stopped waiting for a person changes the aggregate
 }
 
 /** One wait for child news is at most this long; much more between checks means the machine slept. */
@@ -81,6 +82,7 @@ export async function watch(e: Engine, stop: () => boolean, sleep = (ms: number)
   let checked = e.d.now().getTime(); // when the runs were last reconciled
   while (!stop()) {
     if (!e.active.size) {
+      e.announce(); // a paused task with nothing in flight still changes the aggregate
       await sleep(1000);
       checked = e.d.now().getTime();
       continue;
