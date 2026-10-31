@@ -148,7 +148,7 @@ test("report-to gets the result; unknown or ineligible agents are refused before
   const weak = await makeEngine({ runners: [fakeRunner("ro", ["m"], { enforces: ["read", "shell-report"] })] });
   await expect(weak.engine.submit(ask)).rejects.toThrow(/no agent can do 'ask' \(it needs: read, shell-git-read, shell-report, tier small\+\)/);
   expect(existsSync(join(weak.brain, "tasks"))).toBe(false);
-  await expect(k.engine.submit({ ...ask, command: "build" })).rejects.toThrow(/'build' is not available yet/);
+  await expect(k.engine.submit({ ...ask, command: "deploy" })).rejects.toThrow(/unknown command 'deploy'/);
 });
 
 test("a spawn failure is an infra failure of that run", async () => {

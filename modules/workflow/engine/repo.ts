@@ -97,6 +97,9 @@ export async function commitAll(wt: string, message: string, x: Exec = exec): Pr
   return git(x, wt, "rev-parse", "--short", "HEAD");
 }
 
+/** A branch's tip commit. */
+export const tip = (root: string, branch: string, x: Exec = exec) => git(x, root, "rev-parse", `refs/heads/${branch}`);
+
 export const diffSince = (wt: string, base: string, x: Exec = exec) => git(x, wt, "diff", `${base}..HEAD`);
 
 /** The worktree a branch is checked out in, if any (after dropping entries whose folder is gone). */

@@ -4,10 +4,10 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Spec } from "./spec";
 import type { Step, Task } from "./records";
-import type { Submit } from "./engine";
+import type { Submit } from "./types";
 import type { Exec } from "./exec";
 import { edits } from "./plans";
-import { freeBranch, repoDir, repoRoot, stepWorktree, workBase } from "./repo";
+import { freeBranch, integration, repoDir, repoRoot, stepWorktree, tip, workBase } from "./repo";
 import { chooseCheck } from "./checks";
 import { land, type Landed } from "./land";
 
@@ -22,25 +22,47 @@ export async function preparePatch(spec: Spec, s: Submit, x?: Exec): Promise<Pat
   const base = await workBase(root, spec.policy.integration_branch, x);
   const chosen = chooseCheck(root, s.options.check as string | undefined);
   if ("ask" in chosen) throw new Error(chosen.ask);
-  // git reports the canonical root (/private/var/…, resolved symlinks): compare like with like.
-  const prefix = relative(root, realpathSync(s.folder));
-  const only = ((s.options.only as string[] | undefined) ?? []).map((o) => join(prefix, o.replace(/^\.\//, "")).replace(/\/$/, "") || ".");
-  return { root, base, check: chosen.check, only };
+  return { root, base, check: chosen.check, only: normalizeOnly(root, s.folder, (s.options.only as string[] | undefined) ?? []) };
 }
 
-/** Give every editing step its paths, check, a free branch and its worktree folder. */
+/** Paths the user (or a planner) wrote relative to `folder`, made relative to the repo root. */
+export function normalizeOnly(root: string, folder: string, paths: string[]): string[] {
+  // git reports the canonical root (/private/var/…, resolved symlinks): compare like with like.
+  const prefix = relative(root, realpathSync(folder));
+  return paths.map((o) => join(prefix, o.replace(/^\.\//, "")).replace(/\/$/, "") || ".");
+}
+
+/** The integration branch's worktree (created, or found where it is already checked out). */
+export function integrationWorktree(spec: Spec, state: string, root: string, base: string, x?: Exec): Promise<string> {
+  return integration(root, join(repoDir(state, root), "_integration"), spec.policy.integration_branch, base, x);
+}
+
+/** Give every editing step its paths and check, then a branch and worktree. */
 export async function assignPatch(spec: Spec, steps: Step[], p: Patch, state: string, x?: Exec): Promise<void> {
-  for (const step of steps.filter((s) => edits(spec, s.role))) {
-    const branch = await freeBranch(p.root, `wf/${step.id}`, x);
-    Object.assign(step, { only: p.only, check: p.check, branch, worktree: join(repoDir(state, p.root), branch.slice(3)) });
+  for (const step of steps.filter((s) => edits(spec, s.role))) Object.assign(step, { only: p.only, check: p.check });
+  await assignBranches(spec, steps, p.root, state, x);
+}
+
+/** A free branch `wf/<step>` and its worktree folder for every editing step that has none yet. */
+export async function assignBranches(spec: Spec, steps: Step[], root: string, state: string, x?: Exec): Promise<void> {
+  for (const step of steps.filter((s) => edits(spec, s.role) && !s.branch)) {
+    const branch = await freeBranch(root, `wf/${step.id}`, x);
+    Object.assign(step, { branch, worktree: join(repoDir(state, root), branch.slice(3)) });
   }
 }
 
-/** Where a run works: the task folder, or for a patch step the same folder in its worktree. */
-export async function workdir(task: Task, step: Step, x?: Exec): Promise<string> {
+/**
+ * Where a run works: the task folder, or for a patch step the same folder in its worktree. A step
+ * that comes after other patch steps starts from the integration branch, where they were merged.
+ */
+export async function workdir(spec: Spec, task: Task, step: Step, x?: Exec): Promise<string> {
   if (!step.worktree) return task.folder;
   const root = task.options.root as string;
-  await stepWorktree(root, step.worktree, step.branch!, task.options.base as string, x);
+  if (!step.base) {
+    const afterPatch = task.steps.some((s) => step.deps.includes(s.id) && s.worktree);
+    step.base = afterPatch ? await tip(root, spec.policy.integration_branch, x) : (task.options.base as string);
+  }
+  await stepWorktree(root, step.worktree, step.branch!, step.base, x);
   return join(step.worktree, relative(root, realpathSync(task.folder)));
 }
 

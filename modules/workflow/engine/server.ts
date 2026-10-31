@@ -3,7 +3,9 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Socket } from "bun";
-import { Engine, type Deps } from "./engine";
+import { Engine } from "./engine";
+import type { Deps } from "./types";
+import { approve, tell } from "./build";
 import { watch } from "./watch";
 import { request } from "./client";
 import { VERSION } from "./paths";
@@ -12,7 +14,9 @@ export type Request =
   | { op: "ping" }
   | { op: "quit" }
   | { op: "submit"; submit: import("./engine").Submit; wait: boolean }
-  | { op: "report"; run: string; outcome: string; text: string };
+  | { op: "report"; run: string; outcome: string; text: string }
+  | { op: "approve"; task: string }
+  | { op: "tell"; task: string; text: string };
 
 async function handle(e: Engine, req: Request): Promise<Record<string, unknown>> {
   if (req.op === "ping") return { ok: true, active: e.active.size, version: VERSION };
@@ -23,6 +27,14 @@ async function handle(e: Engine, req: Request): Promise<Record<string, unknown>>
   if (req.op === "report") {
     await e.report(req.run, req.outcome, req.text);
     return { ok: true };
+  }
+  if (req.op === "approve" || req.op === "tell") {
+    const task = e.tasks.get(req.task);
+    if (!task) throw new Error(`no open task ${req.task}`);
+    if (req.op === "approve") approve(e, task);
+    else tell(e, task, req.text);
+    const r = await e.wait(task);
+    return { ok: true, task: r.task.id, status: r.task.status, text: r.text };
   }
   if (req.op === "submit") {
     const task = await e.submit(req.submit);

@@ -30,6 +30,8 @@ export type Step = {
   /** Patch steps: the step's own branch and the wf-owned worktree it is checked out in. */
   branch?: string;
   worktree?: string;
+  /** The commit the step's branch started from (the task's base, or integration after its deps). */
+  base?: string;
   status: string;
   runs: Run[];
   steps: Step[];
@@ -100,6 +102,7 @@ function checkStep(parent: RecordCheck, s: Record<string, unknown>, expected: st
   c.text(s, "check", true);
   c.text(s, "branch", true);
   c.text(s, "worktree", true);
+  c.text(s, "base", true);
   for (const w of c.list(s, "with", true) ?? []) if (typeof w !== "string" || !w) c.fail("with", `${JSON.stringify(w)} is not an agent name`);
   for (const d of c.list(s, "deps") ?? []) {
     if (typeof d !== "string" || !c.stepIds.has(d) || d === expected) c.fail("deps", `${JSON.stringify(d)} is not another step of this task`);

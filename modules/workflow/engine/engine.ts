@@ -1,56 +1,33 @@
 // Task lifecycle: submit → plan steps → dispatch each step whose inputs are ready on the cheapest
 // eligible runner → report or infra → fallback → advance → close. One writer (this class);
 // terminals are asked for, never mirrored. A step's result text lives in its run's report.md.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import type { Active, Deps, Result, Submit } from "./types";
 import { join } from "node:path";
-import type { Spec } from "./spec";
-import type { Host } from "./host";
 import { terminalName } from "./host";
-import type { Knowledge } from "./knowledge";
-import type { Store } from "./store";
 import type { Task, Step, Run } from "./records";
-import { choices, type Choice, type Runner } from "./runners";
-import { renderPrompt } from "./prompt";
+import { choices, type Choice } from "./runners";
 import { runId } from "./ids";
 import { wfEnv } from "./paths";
 import { resolveTarget } from "./targets";
-import type { Exec } from "./exec";
-import { available, edits, enoughInput, laterWith, needs, planSteps, resultOf, varsFor, why, type Finished } from "./plans";
+import { available, edits, enoughInput, laterWith, needs, planSteps, resultOf, why, type Finished } from "./plans";
 import { nextChoice } from "./retry";
 import { assignPatch, landStep, preparePatch, workdir } from "./patch";
-import { parseFacts } from "./facts";
+import { recordReport } from "./facts";
+import { evidenceOf, finishedOf } from "./results";
+import { writeState } from "./state";
+import { compose, type Composed } from "./compose";
+import { acceptPlan, finalCheck, nextMilestone, setOptions, workSteps } from "./build";
 
-export type Deps = {
-  spec: Spec;
-  runners: Map<string, Runner>;
-  host: Host;
-  store: Store;
-  knowledge: Knowledge;
-  state: string;
-  now: () => Date;
-  log: (line: string) => void;
-  /** Runs git and gh for resolving review targets (a fake in tests). */
-  exec?: Exec;
-};
-export type Active = { task: Task; step: Step; run: Run; working: boolean; nudged: number };
-export type Result = { task: Task; text: string };
-export type Submit = { command: string; goal: string; folder: string; options: Record<string, unknown> };
 
 const ENDED = ["done", "failed", "stopped"];
 
-/** Per-task runtime files (`<state>/tasks/<id>/`): inputs that must not go into the record. */
-function writeState(state: string, id: string, name: string, text: string): void {
-  mkdirSync(join(state, "tasks", id), { recursive: true });
-  writeFileSync(join(state, "tasks", id, name), text);
-}
-function readState(state: string, id: string, name: string): string | undefined {
-  const f = join(state, "tasks", id, name);
-  return existsSync(f) ? readFileSync(f, "utf8") : undefined;
-}
 const firstLine = (t: string) => (t.trim().split("\n")[0] ?? "").slice(0, 200);
 
 export class Engine {
   readonly active = new Map<string, Active>();
+  /** Open tasks (running, waiting for approval, blocked): what approve and tell act on. */
+  readonly tasks = new Map<string, Task>();
   private waiters = new Map<string, ((r: Result) => void)[]>();
 
   constructor(readonly d: Deps) {}
@@ -66,13 +43,14 @@ export class Engine {
     const target = needs(this.d.spec, cmd, "target") ? await resolveTarget(s.goal, s.folder, this.d.exec) : undefined;
     if (target) s = { ...s, options: { ...s.options, target_label: target.label } };
     const patch = cmd.roles.some((r) => edits(this.d.spec, r)) ? await preparePatch(this.d.spec, s, this.d.exec) : undefined;
-    if (patch) s = { ...s, options: { ...s.options, root: patch.root, base: patch.base } };
+    if (patch) s = { ...s, options: { ...s.options, root: patch.root, base: patch.base, check: patch.check } };
     const steps = planSteps(this.d.spec, this.d.runners, cmd, this.d.store.peekId(), s.goal, wanted);
     if (patch) await assignPatch(this.d.spec, steps, patch, this.d.state, this.d.exec);
     const id = this.d.store.nextId();
     // A PR's diff is third-party and can be large: runtime state, never the brain record.
     if (target) writeState(this.d.state, id, "target.md", target.text);
     const task: Task = { id, command: s.command, goal: s.goal, folder: s.folder, options: s.options, status: "running", created: this.stamp(), closed: null, steps, answers: [] };
+    this.tasks.set(id, task);
     this.d.store.save(task, `# ${s.goal}`);
     void this.d.store.commit(task);
     this.d.log(`${id} ${s.command}: ${s.goal}`);
@@ -87,45 +65,45 @@ export class Engine {
     return choices(role, this.d.runners, this.d.spec.vocab.tiers, only);
   }
 
-  /** What the given steps did: their results, and why earlier runs failed (where quirks show). */
   evidence(task: Task, ids: string[]): string {
-    const report = (run: string) => {
-      const f = join(this.d.state, "runs", run, "report.md");
-      return existsSync(f) ? readFileSync(f, "utf8").trim().slice(0, 1500) : "";
-    };
-    return task.steps
-      .filter((s) => ids.includes(s.id))
-      .map((s) => {
-        const failed = s.runs.filter((r) => r.outcome === "fail" || r.outcome === "infra").map((r) => `- ${r.id} (${r.runner}·${r.model}) ${r.outcome}: ${report(r.id) || r.summary}`);
-        const done = [...s.runs].reverse().find((r) => r.outcome === "done");
-        return [`### ${s.id}: ${s.title} (${s.status})`, done ? report(done.id) : "", failed.length ? `Failed attempts:\n${failed.join("\n")}` : ""].filter(Boolean).join("\n\n");
-      })
-      .join("\n\n");
+    return evidenceOf(this.d.state, task, ids);
   }
 
-  /** Finished steps (of `ids`, else all) with their result text, read back from the run artifacts. */
   finished(task: Task, ids?: string[]): Finished[] {
-    return task.steps
-      .filter((s) => s.status === "done" && (!ids || ids.includes(s.id)))
-      .flatMap((step) => {
-        const run = [...step.runs].reverse().find((r) => r.outcome === "done");
-        const file = run && join(this.d.state, "runs", run.id, "report.md");
-        return file && existsSync(file) ? [{ step, agent: run.runner, text: readFileSync(file, "utf8") }] : [];
-      });
+    return finishedOf(this.d.state, task, ids);
+  }
+
+  /** Words for the task's next planner run (a changed plan, the next milestone). */
+  feedback(task: Task, text: string): void {
+    writeState(this.d.state, task.id, "feedback.md", text);
   }
 
   /** Start every step whose inputs are ready; close the task when nothing is left to run. */
   advance(task: Task): void {
+    const work = workSteps(this, task);
+    const workDone = work.length > 0 && work.every((s) => ENDED.includes(s.status));
+    if (task.status === "running" && workDone) nextMilestone(this, task);
+    // Several patch steps each passed alone: they are proven together on the integration branch
+    // before anything after the work (the curator) may treat them as verified.
+    const together = workDone && !task.options["no-merge"] && work.filter((s) => s.worktree && s.status === "done").length > 1;
+    const hold = together && task.options.final_check !== "passed";
     for (const step of task.steps.filter((s) => s.status === "queued")) {
+      if (hold && this.d.spec.roles.get(step.role)!.after) continue;
       const deps = task.steps.filter((s) => step.deps.includes(s.id));
       if (!deps.every((s) => ENDED.includes(s.status))) continue;
       if (deps.length && !enoughInput(this.cmd(task), this.finished(task, step.deps))) step.status = "stopped";
       else this.dispatch(task, step);
     }
     if (task.steps.some((s) => s.status === "running" || s.status === "paused") || task.status !== "running") return void this.d.store.save(task);
+    if (hold) {
+      if (task.options.final_check !== "running") (setOptions(task, { final_check: "running" }), void finalCheck(this, task));
+      return void this.d.store.save(task);
+    }
     if (task.steps.some((s) => s.status === "queued")) return void this.d.store.save(task);
-    const after = new Set([...this.d.spec.roles.values()].filter((r) => r.after).map((r) => r.name));
-    const r = resultOf(this.cmd(task), task.steps, new Map(this.finished(task).map((f) => [f.step.id, f])), after);
+    const roles = [...this.d.spec.roles.values()];
+    const after = new Set(roles.filter((r) => r.after).map((r) => r.name));
+    const planner = new Set(roles.filter((r) => r.writes === "plan").map((r) => r.name));
+    const r = resultOf(this.cmd(task), task.steps, new Map(this.finished(task).map((f) => [f.step.id, f])), after, planner);
     this.close(task, r.status, r.text);
   }
 
@@ -136,26 +114,21 @@ export class Engine {
       this.d.log(`${step.id} failed: ${why(step)}`);
       return;
     }
-    const role = this.d.spec.roles.get(step.role)!;
     const id = runId(step.id, step.runs.length + 1);
-    const context = this.d.knowledge.context({ folder: task.folder, paths: (task.options.about as string[]) ?? [], goal: task.goal, budget: this.d.spec.policy.limits.context_bytes });
-    let prompt: string;
+    let composed: Composed;
     try {
-      const evidence = role.needs.includes("evidence") ? this.evidence(task, step.deps) : undefined;
-      const vars = varsFor(task, this.finished(task, step.deps), readState(this.d.state, task.id, "target.md"), step, evidence);
-      const last = step.runs.at(-1);
-      const feedback = last?.outcome === "fail" ? readFileSync(join(this.d.state, "runs", last.id, "report.md"), "utf8") : undefined;
-      prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars, context, run: id, multiline: next.runner.multiline, feedback });
+      composed = compose(this, task, step, id, next.runner.multiline);
     } catch (e) {
       step.status = "failed";
       return void this.d.log(`${step.id} failed: cannot build its prompt: ${(e as Error).message}`);
     }
+    const { prompt, context } = composed;
     const run: Run = { id, runner: next.runner.name, model: next.model.id, terminal: null, started: this.stamp(), ended: null, outcome: null };
     step.runs.push(run);
     step.status = "running";
     // What private context this run saw: the leak check compares the patch against it.
     mkdirSync(join(this.d.state, "runs", id), { recursive: true });
-    writeFileSync(join(this.d.state, "runs", id, "context.md"), context.map((c) => c.text).join("\n\n"));
+    writeFileSync(join(this.d.state, "runs", id, "context.md"), context);
     this.active.set(id, { task, step, run, working: false, nudged: 0 });
     void this.spawn(this.active.get(id)!, next, prompt);
   }
@@ -164,7 +137,7 @@ export class Engine {
     const role = this.d.spec.roles.get(a.step.role)!;
     let cwd: string;
     try {
-      cwd = await workdir(a.task, a.step, this.d.exec);
+      cwd = await workdir(this.d.spec, a.task, a.step, this.d.exec);
     } catch (e) {
       // Fails the same way for every runner: the step stops here instead of trying them all.
       return this.abandon(a, `could not prepare its folder: ${(e as Error).message}`);
@@ -212,7 +185,9 @@ export class Engine {
     const landed = outcome === "done" && a.step.worktree ? await landStep(this.d.spec, this.d.state, a.task, a.step, this.d.exec) : undefined;
     if (landed) ({ outcome, text } = landed.ok ? { outcome, text: `${landed.text}\n\n${text.trim()}` } : { outcome: landed.outcome, text: landed.reason });
     const role = this.d.spec.roles.get(a.step.role)!;
-    if (outcome === "done" && role.writes === "knowledge") text = await this.recordKnowledge(a, text);
+    if (outcome === "done" && role.writes === "knowledge") text = await recordReport(this.d.knowledge, text, { folder: a.task.folder, source: a.run.id, date: this.stamp().slice(0, 10) });
+    const plan = outcome === "done" && role.writes === "plan" ? await acceptPlan(this, a, text) : undefined;
+    if (plan && !plan.ok) ({ outcome, text } = { outcome: "fail", text: plan.reason });
     writeFileSync(join(dir, "report.md"), text);
     Object.assign(a.run, { ended: this.stamp(), outcome: outcome === "blocked" ? "stuck" : outcome, summary: firstLine(text) });
     this.d.log(`${a.run.id} ${outcome}: ${firstLine(text)}`);
@@ -222,29 +197,18 @@ export class Engine {
     else if (outcome === "done") step.status = "done";
     else if ((cmd.many && step.role === cmd.roles[0]) || role.after) step.status = "failed"; // drops out, never blocks
     else return this.close(task, "blocked", text, step);
+    if (plan?.ok && plan.waiting) return this.close(task, "awaiting_approval", plan.text);
     this.advance(task);
   }
 
-  /** A curator's report becomes knowledge entries; what happened is the step's result text. */
-  private async recordKnowledge(a: Active, report: string): Promise<string> {
-    const { facts, dropped } = parseFacts(report);
-    const unclear = dropped ? ` (${dropped} unclear line(s) ignored)` : "";
-    if (!facts.length) return `Knowledge: nothing new to record${unclear}.`;
-    try {
-      const r = await this.d.knowledge.record(facts, { folder: a.task.folder, source: a.run.id, date: this.stamp().slice(0, 10) });
-      const lines = [`Knowledge: recorded ${r.applied.length} fact(s)${unclear}.`, ...r.applied.map((x) => `- ${x}`)];
-      if (r.skipped.length) lines.push("Skipped:", ...r.skipped.map((x) => `- ${x}`));
-      return lines.join("\n");
-    } catch (e) {
-      return `Knowledge: not recorded (${(e as Error).message}).`;
-    }
-  }
-
-  close(task: Task, status: "done" | "failed" | "blocked", text: string, waiting?: Step): void {
+  close(task: Task, status: "done" | "failed" | "blocked" | "awaiting_approval", text: string, waiting?: Step): void {
     if (waiting) waiting.status = "paused";
     task.status = status;
-    task.closed = status === "blocked" ? null : this.stamp();
-    const title = { done: this.cmd(task).many ? "Report" : "Answer", failed: "Failed", blocked: "Needs you" }[status];
+    const final = status === "done" || status === "failed";
+    task.closed = final ? this.stamp() : null;
+    if (final) this.tasks.delete(task.id);
+    const approval = `Plan — approve it: wf approve ${task.id} · change it: wf tell ${task.id} "…"`;
+    const title = { done: this.cmd(task).many ? "Report" : "Answer", failed: "Failed", blocked: "Needs you", awaiting_approval: approval }[status];
     this.d.store.save(task, `# ${task.goal}\n\n## ${title}\n\n${text.trim()}`);
     void this.d.store.commit(task);
     this.d.log(`${task.id} ${status}`);
@@ -262,7 +226,9 @@ export class Engine {
 
   /** After a restart: runs the old engine left open died with it (they were its children). */
   async recover(): Promise<void> {
-    for (const task of this.d.store.open().filter((t) => t.status === "running")) {
+    const open = this.d.store.open();
+    for (const task of open) this.tasks.set(task.id, task);
+    for (const task of open.filter((t) => t.status === "running")) {
       const open = task.steps.flatMap((step) => step.runs.filter((r) => r.ended === null).map((run) => ({ step, run })));
       for (const { step, run } of open) {
         const a: Active = { task, step, run, working: false, nudged: 0 };

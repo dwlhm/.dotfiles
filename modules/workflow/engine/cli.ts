@@ -12,8 +12,8 @@ import { brainRoot, socketPath, stateDir } from "./paths";
 
 export const specDir = (): string => process.env.WF_SPEC || join(import.meta.dir, "..", "spec");
 
-/** Exit codes: 0 done · 1 failed or error · 2 usage · 3 needs you. */
-const EXIT = { done: 0, failed: 1, blocked: 3 } as Record<string, number>;
+/** Exit codes: 0 done · 1 failed or error · 2 usage · 3 needs you (a question, a plan to approve). */
+const EXIT = { done: 0, failed: 1, blocked: 3, awaiting_approval: 3 } as Record<string, number>;
 
 function help(spec: Spec): string {
   const live = [...spec.commands.values()].filter((c) => available(spec, c));
@@ -24,6 +24,8 @@ ${live.map((c) => `  wf ${c.example.padEnd(width)}  ${c.about}`).join("\n")}
 
   options: ${live.flatMap((c) => c.options).filter((o, i, a) => a.indexOf(o) === i).join(", ")}
 
+  wf approve <task>                    start the work of a plan that waits for you
+  wf tell <task> "<change>"            send a waiting plan back with what to change
   wf report <run> <outcome> ["text"]   for workers: hand back a run's outcome (text or stdin)
   wf serve                             the engine itself (started on demand as hc terminal 'wf')
   wf hook <runner>                     a runner's tool hook (registered by the Nix module)
@@ -103,6 +105,16 @@ async function hookCmd(name: string | undefined): Promise<number> {
   }
 }
 
+/** `wf approve <task>` / `wf tell <task> "…"`: answer a plan; waits for what comes next. */
+async function answerCmd(cmd: "approve" | "tell", rest: string[]): Promise<number> {
+  const [task, ...words] = rest;
+  if (!task || (cmd === "tell" && !words.join(" ").trim())) throw new UsageError(cmd === "approve" ? "usage: wf approve <task>" : 'usage: wf tell <task> "<what to change>"');
+  const r = await call({ op: cmd, task, text: words.join(" ") }, VERSION);
+  if (!r.ok) return console.error(`wf ${cmd}: ${r.error}`), 1;
+  console.log(`${r.task} ${r.status}\n\n${r.text}`);
+  return EXIT[String(r.status)] ?? 1;
+}
+
 async function submitCmd(spec: Spec, argv: string[]): Promise<number> {
   if (!available(spec, spec.commands.get(argv[0])!)) throw new UsageError(`'${argv[0]}' is not available yet`);
   const submit = parseCommand(spec, argv, process.cwd(), process.env);
@@ -122,6 +134,7 @@ export async function main(argv: string[]): Promise<number> {
     if (cmd === "lint") return await lint(spec, rest);
     if (cmd === "serve") return await serveCmd(spec);
     if (cmd === "report") return await reportCmd(rest);
+    if (cmd === "approve" || cmd === "tell") return await answerCmd(cmd, rest);
     if (cmd && spec.commands.has(cmd)) return await submitCmd(spec, argv);
     if (cmd === undefined || ["help", "--help", "-h"].includes(cmd)) return console.log(help(spec)), cmd === undefined ? 2 : 0;
     console.error(`wf: unknown command '${cmd}'\n\n${help(spec)}`);

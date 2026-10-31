@@ -11,7 +11,7 @@ import { actions } from "./rules";
 /** The prompt variables the engine can fill so far; a role needing others is not runnable yet. */
 export const SUPPLIED = ["question", "goal", "about", "answers", "target", "brief", "only", "check", "evidence"];
 /** Roles whose output the engine cannot turn into work yet (a plan becomes steps in `build`). */
-export const NOT_YET = ["plan"];
+export const NOT_YET: string[] = [];
 /** How many agents `compare` asks when the user names none. */
 export const MANY_DEFAULT = 3;
 
@@ -49,6 +49,8 @@ export function planSteps(spec: Spec, runners: Map<string, Runner>, cmd: Command
     id: stepId(task, [n]), title, role, only: [], deps, status: "queued", runs: [], steps: [], ...(agent ? { with: [agent] } : {}),
   });
   const agents = agentsFor(spec, runners, cmd, wanted);
+  // A planning first stage: the plan's steps replace the later stages once it is accepted.
+  if (spec.roles.get(cmd.roles[0])!.writes === "plan") return withCurator(spec, cmd, [step(1, cmd.roles[0], goal, [])], step);
   // Every later stage must be runnable before any work starts, not discovered after it.
   for (const name of cmd.roles.slice(1)) {
     const role = spec.roles.get(name)!;
@@ -59,11 +61,14 @@ export function planSteps(spec: Spec, runners: Map<string, Runner>, cmd: Command
   const first = agents.length ? agents.map((a, i) => step(i + 1, cmd.roles[0], `${goal} (${a})`, [], a)) : [step(1, cmd.roles[0], goal, [])];
   const out = [...first];
   for (const role of cmd.roles.slice(1)) out.push(step(out.length + 1, role, `${role}: ${goal}`, out.slice(-first.length).map((s) => s.id)));
-  // Policy: after patch work lands, the knowledge-writing role records what it proved.
+  return withCurator(spec, cmd, out, step);
+}
+
+/** Policy: after patch work lands, the knowledge-writing role records what it proved. */
+function withCurator(spec: Spec, cmd: Command, out: Step[], step: (n: number, role: string, title: string, deps: string[]) => Step): Step[] {
   const curator = [...spec.roles.values()].find((r) => r.writes === "knowledge");
-  if (curator && actions(spec, { edits_code: false, touches_ui: false, result_patch: cmd.result === "patch", large_task: false }).has("curate_facts")) {
-    out.push(step(out.length + 1, curator.name, `curate: ${goal}`, out.map((s) => s.id)));
-  }
+  const facts = { edits_code: false, touches_ui: false, result_patch: cmd.result === "patch", large_task: false };
+  if (curator && actions(spec, facts).has("curate_facts")) out.push(step(out.length + 1, curator.name, `curate: ${cmd.name}`, out.map((s) => s.id)));
   return out;
 }
 
@@ -74,17 +79,22 @@ export const laterWith = (cmd: Command, wanted: string[]): string[] => (cmd.many
 export function varsFor(task: Task, finished: Finished[], target?: string, step?: Step, evidence?: string): Vars {
   const answers = finished.map((f) => `### ${f.agent}\n${f.text.trim()}`).join("\n\n");
   const about = (task.options.about as string[] | undefined) ?? ["the whole folder"];
-  const patch = step?.check ? { brief: task.goal, only: step.only.length ? step.only : ["any file in the repository"], check: step.check } : {};
+  const patch = step?.worktree ? { brief: step.title, only: step.only.length ? step.only : ["any file in the repository"] } : {};
+  const check = step?.check ?? (task.options.check as string | undefined);
   const extra = { ...(target === undefined ? {} : { target }), ...(evidence === undefined ? {} : { evidence }) };
-  return { question: task.goal, goal: task.goal, about, answers, ...patch, ...extra };
+  return { question: task.goal, goal: task.goal, about, answers, ...patch, ...(check ? { check } : {}), ...extra };
 }
 
 /** A later stage runs only on enough input: one finished step, or two for a `many` comparison. */
 export const enoughInput = (cmd: Command, finished: Finished[]): boolean => finished.length >= (cmd.many ? 2 : 1);
 
 /** The result: the last stage's text, with each agent's answer under it for a `many` command. */
-export function resultOf(cmd: Command, all: Step[], finished: Map<string, Finished>, after: Set<string> = new Set()): { status: "done" | "failed"; text: string } {
-  const r = workResult(cmd, all.filter((s) => !after.has(s.role)), finished);
+/**
+ * The task's result from its work steps. `aside` roles never make the result: after-work roles
+ * add notes, and a planner's plan was already shown for approval.
+ */
+export function resultOf(cmd: Command, all: Step[], finished: Map<string, Finished>, after: Set<string> = new Set(), planner: Set<string> = new Set()): { status: "done" | "failed"; text: string } {
+  const r = workResult(cmd, all.filter((s) => !after.has(s.role) && !planner.has(s.role)), finished);
   const notes = all.filter((s) => after.has(s.role)).map((s) => finished.get(s.id)?.text.trim()).filter(Boolean);
   return notes.length && r.status === "done" ? { ...r, text: [r.text, ...notes].join("\n\n") } : r;
 }
@@ -92,6 +102,10 @@ export function resultOf(cmd: Command, all: Step[], finished: Map<string, Finish
 function workResult(cmd: Command, steps: Step[], finished: Map<string, Finished>): { status: "done" | "failed"; text: string } {
   const last = steps[steps.length - 1];
   const lastDone = finished.get(last.id);
+  if (!cmd.many && steps.length > 1) {
+    const parts = steps.map((s) => `## ${s.id}: ${s.title}\n\n${finished.get(s.id)?.text.trim() ?? (s.status === "stopped" ? "Not started: a step it needs did not finish." : why(s))}`);
+    return { status: steps.every((s) => finished.has(s.id)) ? "done" : "failed", text: parts.join("\n\n") };
+  }
   if (!cmd.many) return lastDone ? { status: "done", text: lastDone.text.trim() } : { status: "failed", text: why(last) };
   const first = steps.filter((s) => s.role === cmd.roles[0]);
   const answers = first.map((s) => {

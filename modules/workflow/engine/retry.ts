@@ -10,6 +10,7 @@ export function nextChoice(choices: Choice[], runs: Run[], tiers: string[], retr
   const last = runs.at(-1);
   const tried = new Set(runs.map((r) => key(r.runner, r.model)));
   const untried = choices.filter((c) => !tried.has(key(c.runner.name, c.model.id)));
+  if (last?.outcome === "done") return choices[0]; // reopened after it was done (a plan sent back): ask afresh
   if (!last || last.outcome !== "fail") return untried[0];
   const same = choices.find((c) => key(c.runner.name, c.model.id) === key(last.runner, last.model));
   const tier = tiers.indexOf(same?.model.tier ?? "");

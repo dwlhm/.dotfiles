@@ -1,6 +1,7 @@
 // Reconcile active runs with what the host observes. Status is only what hc reports (OSC 7501);
 // a run "started" once it was seen working, so earlier statuses are startup noise.
-import type { Active, Engine } from "./engine";
+import type { Engine } from "./engine";
+import type { Active } from "./types";
 
 /** How long a worker may sit idle after the reminder before the run counts as `infra`. */
 export const NUDGE_SECONDS = 90;

@@ -25,8 +25,8 @@ export type Role = {
   prompt: string;
   /** Runs after the work and never decides the task's result (its failure is only noted). */
   after: boolean;
-  /** `knowledge`: the engine records the role's report as knowledge entries. */
-  writes?: "knowledge";
+  /** What the engine does with the role's report: record it as knowledge, or turn it into steps. */
+  writes?: "knowledge" | "plan";
 };
 
 export type Spec = {
@@ -82,7 +82,7 @@ function loadRole(doc: Doc, vocab: Vocab): { role: Role; errors: string[] } {
     reports,
     prompt: doc.body,
     after: c.flag(d, "after") ?? false,
-    ...(d.writes === undefined ? {} : { writes: c.oneOf(d, "writes", ["knowledge"]) as "knowledge" }),
+    ...(d.writes === undefined ? {} : { writes: c.oneOf(d, "writes", ["knowledge", "plan"]) as "knowledge" | "plan" }),
   };
   return { role, errors: c.errors };
 }

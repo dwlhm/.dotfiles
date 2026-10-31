@@ -39,6 +39,18 @@ index and current branch are never touched; `wf/integration` reaches their branc
 command. Claude Code must trust the worktree folder once (open `claude` in
 `~/.local/state/wf/worktrees` and accept); until then claude runs fall back to other runners.
 
+`build`: a planner (role `plan`, `writes: plan`) reads the code and reports blocks of `step:` /
+`only:` / `check:` / `after:` / `qa:` (and a final `later:` for what remains). The engine checks
+the plan (`engine/planfmt.ts`: every step has paths and a check, `after` names earlier steps,
+steps that can run together never share paths, at most `steps_per_level`) and sends a broken one
+back with the reasons. A plan of more than `small_task_steps` steps waits for the user
+(`awaiting_approval`, exit 3): `wf approve <task>` starts it, `wf tell <task> "…"` sends it back
+with their words (`just-go` skips, `ask-first` forces). Steps run as soon as what they come
+after has merged, in parallel otherwise; a step that comes after others branches from
+`wf/integration` so it sees their work. A `qa:` command adds a paired qa step. Once every step
+merged, the task's check runs once more on `wf/integration` (all together) before the curator
+may run; a failure there is the user's. `later:` plans the next milestone the same way.
+
 After patch work lands, policy `curate_facts` adds the knowledge-writing role (`curate`,
 `after: true`, `writes: knowledge`): it gets the evidence (each step's result and why earlier
 runs failed) and reports `nothing` or lines `project: …` / `topic <name>: …`. The engine appends

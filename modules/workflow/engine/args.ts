@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { Spec } from "./spec";
-import type { Submit } from "./engine";
+import type { Submit } from "./types";
 
 export class UsageError extends Error {}
 
