@@ -16,6 +16,8 @@ export type Deps = {
   state: string;
   now: () => Date;
   log: (line: string) => void;
+  /** Where the engine's own status (OSC 7501) goes; the terminal in production, a list in tests. */
+  write?: (text: string) => void;
   /** Runs git and gh for resolving review targets (a fake in tests). */
   exec?: Exec;
 };
@@ -32,3 +34,11 @@ export type Active = {
 };
 export type Result = { task: Task; text: string };
 export type Submit = { command: string; goal: string; folder: string; options: Record<string, unknown> };
+
+/** The engine's own status as OSC 7501: the most urgent open state, why, and whether it waits for a person. */
+export type Report = {
+  state: "blocked" | "working" | "idle";
+  /** Set only while the engine waits for the user (a blocked task or a plan to approve). */
+  kind?: "question";
+  msg: string;
+};
