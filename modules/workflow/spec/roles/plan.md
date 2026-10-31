@@ -14,7 +14,7 @@ Read the code first, then plan. Do not edit anything.
 Report the plan, and nothing else, as blocks like this (one blank line between blocks):
 
     step: <the one outcome of this step, as one sentence>
-    only: <the paths this step may edit, comma separated>
+    only: <the paths this step may edit, relative to the folder you work in, comma separated>
     check: <a command that proves this step is done>
     after: <numbers of the steps it needs first, e.g. 1, 2; leave out when none>
     qa: <a UI test command, only for a step that changes UI>
