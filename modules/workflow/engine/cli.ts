@@ -6,14 +6,12 @@ import { checkTask } from "./records";
 import { adaptersDir, loadRunners, type RunnerCode } from "./runners";
 import { parseCommand, UsageError } from "./args";
 import { call, request, NotRunning } from "./client";
-import { VERSION } from "./paths";
 import { available } from "./plans";
-import { brainRoot, socketPath, stateDir } from "./paths";
+import { VERSION, brainRoot, socketPath, stateDir } from "./paths";
+import * as control from "./control-cli";
+import { EXIT } from "./control-cli";
 
 export const specDir = (): string => process.env.WF_SPEC || join(import.meta.dir, "..", "spec");
-
-/** Exit codes: 0 done · 1 failed or error · 2 usage · 3 needs you (a question, a plan to approve). */
-const EXIT = { done: 0, failed: 1, blocked: 3, awaiting_approval: 3 } as Record<string, number>;
 
 function help(spec: Spec): string {
   const live = [...spec.commands.values()].filter((c) => available(spec, c));
@@ -25,8 +23,15 @@ ${live.map((c) => `  wf ${c.example.padEnd(width)}  ${c.about}`).join("\n")}
   options: ${live.flatMap((c) => c.options).filter((o, i, a) => a.indexOf(o) === i).join(", ")}
 
   wf approve <task>                    start the work of a plan that waits for you
-  wf tell <task> "<change>"            send a waiting plan back with what to change
   wf report <run> <outcome> ["text"]   for workers: hand back a run's outcome (text or stdin)
+  wf status                            every open task, its progress and the runs in flight
+  wf show <task|step|run>              details of one task, step or run
+  wf watch <task|step|run>             attach to a run's terminal, or print its last screen
+  wf pause|resume|stop <task>          pause, resume or stop a task
+  wf tell <task> "<change>"            send words to a waiting plan or a running task
+  wf take <task|step|run>              drive a run yourself
+  wf give back <task|step|run>         give a taken run back to the engine
+  wf merge [in <folder>]               merge wf/integration into your current branch
   wf serve                             the engine itself (started on demand as hc terminal 'wf')
   wf hook <runner>                     a runner's tool hook (registered by the Nix module)
   wf lint [<record.md>…]               check the spec, adapters and task records`;
@@ -105,14 +110,21 @@ async function hookCmd(name: string | undefined): Promise<number> {
   }
 }
 
-/** `wf approve <task>` / `wf tell <task> "…"`: answer a plan; waits for what comes next. */
-async function answerCmd(cmd: "approve" | "tell", rest: string[]): Promise<number> {
-  const [task, ...words] = rest;
-  if (!task || (cmd === "tell" && !words.join(" ").trim())) throw new UsageError(cmd === "approve" ? "usage: wf approve <task>" : 'usage: wf tell <task> "<what to change>"');
-  const r = await call({ op: cmd, task, text: words.join(" ") }, VERSION);
-  if (!r.ok) return console.error(`wf ${cmd}: ${r.error}`), 1;
+/** `wf approve <task>`: start a plan that waits for you; waits for what comes next. */
+async function approveCmd(rest: string[]): Promise<number> {
+  const [task] = rest;
+  if (!task) throw new UsageError("usage: wf approve <task>");
+  const r = await call({ op: "approve", task }, VERSION);
+  if (!r.ok) return console.error(`wf approve: ${r.error}`), 1;
   console.log(`${r.task} ${r.status}\n\n${r.text}`);
   return EXIT[String(r.status)] ?? 1;
+}
+
+/** Print a control command's result; its code is the CLI's exit code. */
+function emit(r: control.Result): number {
+  if (r.out) console.log(r.out);
+  if (r.err) console.error(r.err);
+  return r.code;
 }
 
 async function submitCmd(spec: Spec, argv: string[]): Promise<number> {
@@ -134,7 +146,17 @@ export async function main(argv: string[]): Promise<number> {
     if (cmd === "lint") return await lint(spec, rest);
     if (cmd === "serve") return await serveCmd(spec);
     if (cmd === "report") return await reportCmd(rest);
-    if (cmd === "approve" || cmd === "tell") return await answerCmd(cmd, rest);
+    if (cmd === "approve") return await approveCmd(rest);
+    if (cmd === "status") return emit(await control.status());
+    if (cmd === "show") return emit(await control.show(rest[0]));
+    if (cmd === "watch") return emit(await control.watch(spec, rest[0]));
+    if (cmd === "tell") return emit(await control.tell(rest[0], rest.slice(1).join(" ")));
+    if (cmd === "pause" || cmd === "resume" || cmd === "stop" || cmd === "take") return emit(await control.control(cmd, rest[0]));
+    if (cmd === "give") {
+      if (rest[0] !== "back") throw new UsageError("usage: wf give back <task|step|run>");
+      return emit(await control.control("giveback", rest[1]));
+    }
+    if (cmd === "merge") return emit(await control.merge(spec, rest));
     if (cmd && spec.commands.has(cmd)) return await submitCmd(spec, argv);
     if (cmd === undefined || ["help", "--help", "-h"].includes(cmd)) return console.log(help(spec)), cmd === undefined ? 2 : 0;
     console.error(`wf: unknown command '${cmd}'\n\n${help(spec)}`);

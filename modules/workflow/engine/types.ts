@@ -19,6 +19,16 @@ export type Deps = {
   /** Runs git and gh for resolving review targets (a fake in tests). */
   exec?: Exec;
 };
-export type Active = { task: Task; step: Step; run: Run; working: boolean; nudged: number };
+export type Active = {
+  task: Task;
+  step: Step;
+  run: Run;
+  working: boolean;
+  nudged: number;
+  /** `take`: the user drives this run, so the engine stops reconciling it until `give back`. */
+  taken?: boolean;
+  /** Epoch ms the run's time limits count from; `give back` restarts them at now. Unset means `run.started`. */
+  limitsFrom?: number;
+};
 export type Result = { task: Task; text: string };
 export type Submit = { command: string; goal: string; folder: string; options: Record<string, unknown> };

@@ -26,6 +26,9 @@ outcomes:
   infra:
     by: engine
     about: The runner crashed, hung, ran out of quota or exited
+  stopped:
+    by: engine
+    about: The user stopped the task
 tiers: [small, medium, large]
 results:
   answer: A direct answer, shown in the console
