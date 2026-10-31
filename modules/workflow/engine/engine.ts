@@ -15,12 +15,13 @@ import { nextChoice } from "./retry";
 import { assignPatch, landStep, preparePatch, workdir } from "./patch";
 import { recordReport } from "./facts";
 import { evidenceOf, finishedOf } from "./results";
+import { ended, flat } from "./steps";
+import { splitStep } from "./split";
 import { writeState } from "./state";
 import { compose, type Composed } from "./compose";
 import { acceptPlan, finalCheck, nextMilestone, setOptions, workSteps } from "./build";
 
 
-const ENDED = ["done", "failed", "stopped"];
 
 const firstLine = (t: string) => (t.trim().split("\n")[0] ?? "").slice(0, 200);
 
@@ -81,25 +82,27 @@ export class Engine {
   /** Start every step whose inputs are ready; close the task when nothing is left to run. */
   advance(task: Task): void {
     const work = workSteps(this, task);
-    const workDone = work.length > 0 && work.every((s) => ENDED.includes(s.status));
+    const workDone = work.length > 0 && work.every((s) => ended(s) !== null);
     if (task.status === "running" && workDone) nextMilestone(this, task);
     // Several patch steps each passed alone: they are proven together on the integration branch
     // before anything after the work (the curator) may treat them as verified.
-    const together = workDone && !task.options["no-merge"] && work.filter((s) => s.worktree && s.status === "done").length > 1;
+    const patched = flat(work).filter((s) => s.worktree && s.status === "done").length;
+    const together = workDone && !task.options["no-merge"] && patched > 1;
     const hold = together && task.options.final_check !== "passed";
-    for (const step of task.steps.filter((s) => s.status === "queued")) {
+    const all = flat(task.steps);
+    for (const step of all.filter((s) => s.status === "queued")) {
       if (hold && this.d.spec.roles.get(step.role)!.after) continue;
-      const deps = task.steps.filter((s) => step.deps.includes(s.id));
-      if (!deps.every((s) => ENDED.includes(s.status))) continue;
+      const deps = all.filter((s) => step.deps.includes(s.id));
+      if (!deps.every((s) => ended(s) !== null)) continue;
       if (deps.length && !enoughInput(this.cmd(task), this.finished(task, step.deps))) step.status = "stopped";
       else this.dispatch(task, step);
     }
-    if (task.steps.some((s) => s.status === "running" || s.status === "paused") || task.status !== "running") return void this.d.store.save(task);
+    if (all.some((s) => s.status === "running" || s.status === "paused") || task.status !== "running") return void this.d.store.save(task);
     if (hold) {
       if (task.options.final_check !== "running") (setOptions(task, { final_check: "running" }), void finalCheck(this, task));
       return void this.d.store.save(task);
     }
-    if (task.steps.some((s) => s.status === "queued")) return void this.d.store.save(task);
+    if (all.some((s) => s.status === "queued")) return void this.d.store.save(task);
     const roles = [...this.d.spec.roles.values()];
     const after = new Set(roles.filter((r) => r.after).map((r) => r.name));
     const planner = new Set(roles.filter((r) => r.writes === "plan").map((r) => r.name));
@@ -188,6 +191,8 @@ export class Engine {
     if (outcome === "done" && role.writes === "knowledge") text = await recordReport(this.d.knowledge, text, { folder: a.task.folder, source: a.run.id, date: this.stamp().slice(0, 10) });
     const plan = outcome === "done" && role.writes === "plan" ? await acceptPlan(this, a, text) : undefined;
     if (plan && !plan.ok) ({ outcome, text } = { outcome: "fail", text: plan.reason });
+    const split = outcome === "too_big" && a.step.worktree ? await splitStep(this, a, text) : undefined;
+    if (split) ({ outcome, text } = split.ok ? { outcome, text: split.text } : { outcome: split.outcome, text: split.reason });
     writeFileSync(join(dir, "report.md"), text);
     Object.assign(a.run, { ended: this.stamp(), outcome: outcome === "blocked" ? "stuck" : outcome, summary: firstLine(text) });
     this.d.log(`${a.run.id} ${outcome}: ${firstLine(text)}`);
@@ -195,6 +200,7 @@ export class Engine {
     const cmd = this.cmd(task);
     if (outcome === "infra" || outcome === "fail") this.dispatch(task, step);
     else if (outcome === "done") step.status = "done";
+    else if (split?.ok) step.status = "split"; // its sub-steps carry on
     else if ((cmd.many && step.role === cmd.roles[0]) || role.after) step.status = "failed"; // drops out, never blocks
     else return this.close(task, "blocked", text, step);
     if (plan?.ok && plan.waiting) return this.close(task, "awaiting_approval", plan.text);
@@ -229,7 +235,7 @@ export class Engine {
     const open = this.d.store.open();
     for (const task of open) this.tasks.set(task.id, task);
     for (const task of open.filter((t) => t.status === "running")) {
-      const open = task.steps.flatMap((step) => step.runs.filter((r) => r.ended === null).map((run) => ({ step, run })));
+      const open = flat(task.steps).flatMap((step) => step.runs.filter((r) => r.ended === null).map((run) => ({ step, run })));
       for (const { step, run } of open) {
         const a: Active = { task, step, run, working: false, nudged: 0 };
         this.active.set(run.id, a);

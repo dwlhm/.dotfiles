@@ -10,6 +10,7 @@ import { edits } from "./plans";
 import { freeBranch, integration, repoDir, repoRoot, stepWorktree, tip, workBase } from "./repo";
 import { chooseCheck } from "./checks";
 import { land, type Landed } from "./land";
+import { flat } from "./steps";
 
 export type Patch = { root: string; base: string; check: string; only: string[] };
 
@@ -59,7 +60,7 @@ export async function workdir(spec: Spec, task: Task, step: Step, x?: Exec): Pro
   if (!step.worktree) return task.folder;
   const root = task.options.root as string;
   if (!step.base) {
-    const afterPatch = task.steps.some((s) => step.deps.includes(s.id) && s.worktree);
+    const afterPatch = flat(task.steps).some((s) => step.deps.includes(s.id) && s.worktree); // siblings nest
     step.base = afterPatch ? await tip(root, spec.policy.integration_branch, x) : (task.options.base as string);
   }
   await stepWorktree(root, step.worktree, step.branch!, step.base, x);

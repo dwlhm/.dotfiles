@@ -49,7 +49,9 @@ with their words (`just-go` skips, `ask-first` forces). Steps run as soon as wha
 after has merged, in parallel otherwise; a step that comes after others branches from
 `wf/integration` so it sees their work. A `qa:` command adds a paired qa step. Once every step
 merged, the task's check runs once more on `wf/integration` (all together) before the curator
-may run; a failure there is the user's. `later:` plans the next milestone the same way.
+may run; a failure there is the user's. `later:` plans the next milestone the same way. A worker that finds its step too big reports `too_big` with
+sub-steps in the same block format: they must stay inside the step's paths and never go deeper
+than `plan_depth` (past it the user decides); the step becomes `split` and ends with them.
 
 After patch work lands, policy `curate_facts` adds the knowledge-writing role (`curate`,
 `after: true`, `writes: knowledge`): it gets the evidence (each step's result and why earlier

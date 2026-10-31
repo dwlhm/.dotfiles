@@ -137,6 +137,12 @@ export async function mergeInto(intWt: string, branch: string, message: string, 
   return { conflicts: files };
 }
 
+/** A split step's own worktree and branch: removed when they hold nothing (clean, no commits). */
+export async function dropIfEmpty(root: string, wt: string, branch: string, base: string, x: Exec = exec): Promise<void> {
+  if (existsSync(wt) && !(await changed(wt, x)).length) await git(x, root, "worktree", "remove", wt);
+  if ((await x("git", ["-C", root, "rev-list", "--count", `${base}..${branch}`], root)).out.trim() === "0") await git(x, root, "branch", "-D", branch);
+}
+
 /** Remove a clean step worktree, and its branch once `into` contains it. */
 export async function cleanup(root: string, wt: string, branch: string, into: string | null, x: Exec = exec): Promise<void> {
   if (existsSync(wt) && !(await changed(wt, x)).length) await git(x, root, "worktree", "remove", wt);

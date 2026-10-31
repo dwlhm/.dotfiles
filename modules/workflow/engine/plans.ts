@@ -103,7 +103,7 @@ function workResult(cmd: Command, steps: Step[], finished: Map<string, Finished>
   const last = steps[steps.length - 1];
   const lastDone = finished.get(last.id);
   if (!cmd.many && steps.length > 1) {
-    const parts = steps.map((s) => `## ${s.id}: ${s.title}\n\n${finished.get(s.id)?.text.trim() ?? (s.status === "stopped" ? "Not started: a step it needs did not finish." : why(s))}`);
+    const parts = steps.map((s) => `## ${s.id}: ${s.title}\n\n${finished.get(s.id)?.text.trim() ?? missing(s)}`);
     return { status: steps.every((s) => finished.has(s.id)) ? "done" : "failed", text: parts.join("\n\n") };
   }
   if (!cmd.many) return lastDone ? { status: "done", text: lastDone.text.trim() } : { status: "failed", text: why(last) };
@@ -115,6 +115,13 @@ function workResult(cmd: Command, steps: Step[], finished: Map<string, Finished>
   if (!first.some((s) => finished.has(s.id))) return { status: "failed", text: answers.join("\n\n") };
   const summary = lastDone ? lastDone.text.trim() : last.status === "stopped" ? "No comparison: only one agent answered." : `No comparison. ${why(last)}`;
   return { status: "done", text: [`## Summary\n\n${summary}`, ...answers].join("\n\n") };
+}
+
+/** Why a step has no result: not started, its sub-steps' trouble, or what its runs ended with. */
+function missing(s: Step): string {
+  if (s.status === "stopped") return "Not started: a step it needs did not finish.";
+  if (s.status === "split") return s.steps.map((c) => `- ${c.id}: ${c.status === "done" ? "done" : missing(c)}`).join("\n");
+  return why(s);
 }
 
 /** Why a step has no result: what each of its runs ended with. */
