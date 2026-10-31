@@ -10,7 +10,10 @@ import { checkPlan, parsePlan, showPlan, type Plan } from "./planfmt";
 import type { Engine } from "./engine";
 import type { Active } from "./types";
 import { assignBranches, integrationWorktree, normalizeOnly } from "./patch";
+import { unknownPaths } from "./repo";
 import { runCheck } from "./checks";
+import { evidenceOf } from "./results";
+import { writeState } from "./state";
 import { join, relative } from "node:path";
 import { realpathSync } from "node:fs";
 
@@ -80,7 +83,10 @@ export async function acceptPlan(e: Engine, a: Active, report: string): Promise<
   const errors = checkPlan(parsed.plan, e.d.spec.policy.limits);
   if (errors.length) return { ok: false, reason: `The plan breaks these rules:\n${errors.map((x) => `- ${x}`).join("\n")}` };
   const { task } = a;
-  const steps = planToSteps(e.d.spec, e.d.spec.commands.get(task.command)!, task, parsed.plan, (p) => normalizeOnly(task.options.root as string, task.folder, p));
+  const root = task.options.root as string;
+  const wrong = unknownPaths(root, parsed.plan.steps.flatMap((s) => normalizeOnly(root, task.folder, s.only)));
+  if (wrong.length) return { ok: false, reason: `These paths do not exist under ${task.folder}: ${wrong.join(", ")}. Write every path relative to ${task.folder}, the folder you work in.` };
+  const steps = planToSteps(e.d.spec, e.d.spec.commands.get(task.command)!, task, parsed.plan, (p) => normalizeOnly(root, task.folder, p));
   const after = task.steps.filter((s) => e.d.spec.roles.get(s.role)!.after);
   task.steps = [...task.steps.filter((s) => !after.includes(s)), ...steps, ...after];
   for (const s of after) s.deps = workSteps(e, task).map((w) => w.id);
@@ -110,7 +116,7 @@ export function tell(e: Engine, task: Task, text: string): void {
   task.steps = task.steps.filter((s) => !proposal.has(s.id));
   for (const s of task.steps.filter((x) => e.d.spec.roles.get(x.role)!.after)) s.deps = [planner.id];
   renumber(task);
-  e.feedback(task, `The user wants your plan changed: ${text.trim()}`);
+  writeState(e.d.state, task.id, "feedback.md", `The user wants your plan changed: ${text.trim()}`);
   planner.status = "queued";
   task.status = "running";
   setOptions(task, { proposal: [], later: undefined });
@@ -145,7 +151,7 @@ export function nextMilestone(e: Engine, task: Task): boolean {
   task.steps = [...task.steps.filter((s) => !after.includes(s)), step, ...after];
   for (const s of after) s.deps = [step.id];
   renumber(task);
-  e.feedback(task, `The first milestone is done and merged:\n${e.evidence(task, workSteps(e, task).map((s) => s.id))}\n\nNow plan the next milestone: ${later}`);
+  writeState(e.d.state, task.id, "feedback.md", `The first milestone is done and merged:\n${evidenceOf(e.d.state, task, workSteps(e, task).map((s) => s.id))}\n\nNow plan the next milestone: ${later}`);
   setOptions(task, { later: undefined, final_check: undefined });
   return true;
 }

@@ -5,7 +5,7 @@ import type { Active } from "./types";
 import type { Step } from "./records";
 import { checkPlan, parsePlan } from "./planfmt";
 import { assignBranches, normalizeOnly } from "./patch";
-import { dropIfEmpty, outside } from "./repo";
+import { dropIfEmpty, outside, unknownPaths } from "./repo";
 import { depth } from "./steps";
 
 export type Split = { ok: true; text: string } | { ok: false; outcome: "fail" | "blocked"; reason: string };
@@ -23,6 +23,8 @@ export async function splitStep(e: Engine, a: Active, report: string): Promise<S
   const root = task.options.root as string;
   const subs = parsed.plan.steps.map((p) => ({ ...p, only: normalizeOnly(root, task.folder, p.only) }));
   const errors = checkPlan({ steps: subs }, e.d.spec.policy.limits);
+  const wrong = unknownPaths(root, subs.flatMap((p) => p.only));
+  if (wrong.length) errors.push(`these paths do not exist under ${task.folder}: ${wrong.join(", ")} (write them relative to it)`);
   for (const [i, p] of subs.entries()) {
     const out = outside(p.only.map(stem), step.only);
     if (out.length) errors.push(`sub-step ${i + 1} may edit ${out.join(", ")}, outside this step's paths (${step.only.join(", ")})`);

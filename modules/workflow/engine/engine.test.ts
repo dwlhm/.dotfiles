@@ -173,3 +173,40 @@ test("after a restart, runs left open count as infra and the step goes on", asyn
   expect(task.steps[0].runs[0].summary).toBe("the engine restarted while this run was open");
   expect(new Store(k.brain, k.spec).nextId()).toBe("w2");
 });
+
+test("a machine that slept moves run limits on instead of ending every run at wake", async () => {
+  const { watch } = await import("./watch");
+  const k = await makeEngine({ runners: [fakeRunner("oc", ["a", "b"])] });
+  await k.engine.submit(ask);
+  await settle();
+  k.host.set("t1", { status: { state: "working" } });
+  let ticks = 0;
+  const minutes = k.spec.policy.limits.run_minutes;
+  // Each wait: one ordinary 30 s, then a 2-hour sleep, then ordinary again.
+  k.host.waitChildren = async () => {
+    ticks++;
+    k.clock.t += ticks === 2 ? (minutes + 100) * 60_000 : 30_000;
+  };
+  await watch(k.engine, () => ticks >= 4, async () => {});
+  expect(k.engine.active.size).toBe(1); // still the same run
+  expect(k.logs.join("\n")).toMatch(/the machine slept for about \d+ min; run limits moved on by that/);
+  expect(k.logs.join("\n")).not.toMatch(/still working after/);
+});
+
+test("an engine recovers only the tasks it owns, never another state folder's", async () => {
+  const k = await makeEngine({ runners: [fakeRunner("oc", ["a", "b"])] });
+  const task = await k.engine.submit(ask);
+  await settle();
+  expect(task.options.engine).toBe(k.state);
+  const { Engine } = await import("./engine");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const other = new Engine({ ...k.engine.d, state: mkdtempSync(join(tmpdir(), "wf-other-")), store: new Store(k.brain, k.spec) });
+  await other.recover();
+  expect(other.tasks.size).toBe(0);
+  expect(other.active.size).toBe(0);
+  expect(k.logs.join("\n")).toMatch(/1 open task\(s\) belong to another engine; left alone/);
+  const owner = new Engine({ ...k.engine.d, store: new Store(k.brain, k.spec) });
+  await owner.recover();
+  expect(owner.tasks.has(task.id)).toBe(true);
+});

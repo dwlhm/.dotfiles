@@ -78,6 +78,18 @@ export async function changed(wt: string, x: Exec = exec): Promise<string[]> {
   return r.out.split("\n").filter(Boolean).flatMap((l) => l.slice(3).split(" -> ")).map((p) => p.replace(/^"|"$/g, ""));
 }
 
+/**
+ * `only` paths (repo-relative) that cannot be right: a path of several parts whose first folder
+ * does not exist in the repo (a plan written relative to some other folder). A new file at the top
+ * or under an existing folder is fine.
+ */
+export function unknownPaths(root: string, paths: string[]): string[] {
+  return paths.filter((p) => {
+    const parts = p.replace(/^\.\//, "").split(/[*?[{]/)[0].split("/").filter(Boolean);
+    return parts.length > 1 && !existsSync(join(root, parts[0]));
+  });
+}
+
 /** Changed paths outside `only` (repo-relative globs, or plain files/folders; empty = anywhere). */
 export function outside(paths: string[], only: string[]): string[] {
   if (!only.length) return [];

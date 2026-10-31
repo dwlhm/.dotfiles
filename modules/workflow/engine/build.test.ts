@@ -173,3 +173,12 @@ test("build: a plan waiting for approval survives an engine restart and can stil
   approve(again, reloaded);
   await until(() => [...again.active.values()].filter((a) => a.step.role === "implement" && a.run.terminal).length === 2);
 });
+
+test("build: a plan whose paths are relative to some other folder goes back with the reason", async () => {
+  const dir = await repo();
+  const k = await makeEngine({ runners });
+  await k.engine.submit({ command: "build", goal: "x", folder: dir, options: { check, "just-go": true } });
+  await reportRole(k, "plan", "step: a is 1\nonly: lib/src/a.txt\ncheck: true\n\nstep: new top file\nonly: NOTES.md\ncheck: true");
+  await until(() => k.host.spawned.length === 2);
+  expect(k.host.spawned[1].argv.at(-1)).toContain(`These paths do not exist under ${dir}: lib/src/a.txt. Write every path relative to ${dir}`);
+});

@@ -109,7 +109,6 @@ async function endStopped(e: Engine, a: { run: Run; task: Task }): Promise<void>
   if (!e.active.delete(a.run.id)) return;
   const dir = join(e.d.state, "runs", a.run.id);
   mkdirSync(dir, { recursive: true });
-  e.saveContext(a.run.id, dir);
   if (a.run.terminal) {
     writeFileSync(join(dir, "screen.txt"), await e.d.host.snapshot(a.run.terminal, 200).catch(() => ""));
     await e.d.host.close(a.run.terminal).catch(() => {});
