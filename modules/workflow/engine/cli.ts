@@ -29,8 +29,8 @@ ${live.map((c) => `  wf ${c.example.padEnd(width)}  ${c.about}`).join("\n")}
   wf watch <task|step|run>             attach to a run's terminal, or print its last screen
   wf pause|resume|stop <task>          pause, resume or stop a task
   wf tell <task> "<change>"            send words to a waiting plan or a running task
-  wf take <task|step|run>              drive a run yourself
-  wf give back <task|step|run>         give a taken run back to the engine
+  wf take <step|run>                   drive a run yourself (the engine stops checking it)
+  wf give back <step|run>              give a taken run back to the engine
   wf merge [in <folder>]               merge wf/integration into your current branch
   wf serve                             the engine itself (started on demand as hc terminal 'wf')
   wf hook <runner>                     a runner's tool hook (registered by the Nix module)

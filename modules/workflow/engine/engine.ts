@@ -30,8 +30,6 @@ export class Engine {
   /** Open tasks (running, waiting for approval, blocked): what approve and tell act on. */
   readonly tasks = new Map<string, Task>();
   private waiters = new Map<string, ((r: Result) => void)[]>();
-  /** Private context per run, kept in memory until the run ends and is saved with it. */
-  private contexts = new Map<string, string>();
 
   constructor(readonly d: Deps) {}
 
@@ -133,9 +131,10 @@ export class Engine {
     const run: Run = { id, runner: next.runner.name, model: next.model.id, terminal: null, started: this.stamp(), ended: null, outcome: null };
     step.runs.push(run);
     step.status = "running";
-    // What private context this run saw: the leak check compares the patch against it. It is saved
-    // with the run when it ends, so a run still in flight has no artifacts yet.
-    this.contexts.set(id, context);
+    // What private context this run saw, on disk from the start: the leak check compares the patch
+    // against it, including after a restart (a later run continues this run's worktree).
+    mkdirSync(join(this.d.state, "runs", id), { recursive: true });
+    writeFileSync(join(this.d.state, "runs", id, "context.md"), context);
     this.active.set(id, { task, step, run, working: false, nudged: 0 });
     void this.spawn(this.active.get(id)!, next, prompt);
   }
@@ -161,19 +160,9 @@ export class Engine {
     }
   }
 
-  /** Save the private context a run was given as its `context.md`, once the run has ended. */
-  saveContext(runId: string, dir: string): void {
-    const context = this.contexts.get(runId);
-    if (context !== undefined) writeFileSync(join(dir, "context.md"), context);
-    this.contexts.delete(runId);
-  }
-
   /** End a run and its step for a reason no other runner would change. */
   private abandon(a: Active, reason: string): void {
     this.active.delete(a.run.id);
-    const dir = join(this.d.state, "runs", a.run.id);
-    mkdirSync(dir, { recursive: true });
-    this.saveContext(a.run.id, dir);
     Object.assign(a.run, { ended: this.stamp(), outcome: "infra", summary: firstLine(reason) });
     a.step.status = "failed";
     this.d.log(`${a.step.id} failed: ${reason}`);
@@ -195,7 +184,6 @@ export class Engine {
     if (!this.active.delete(a.run.id)) return;
     const dir = join(this.d.state, "runs", a.run.id);
     mkdirSync(dir, { recursive: true });
-    this.saveContext(a.run.id, dir);
     if (a.run.terminal) {
       writeFileSync(join(dir, "screen.txt"), await this.d.host.snapshot(a.run.terminal, 200).catch(() => ""));
       await this.d.host.close(a.run.terminal).catch(() => {});

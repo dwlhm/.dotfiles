@@ -44,7 +44,8 @@ test("status: open tasks with work progress and the runs in flight; show: tree a
   expect(run).toContain("model: m1");
   expect(run).toContain("terminal: t1");
   expect(run).toContain("outcome: running");
-  expect(run).toContain("artifacts: none"); // nothing saved until the run ends
+  // The private context is on disk from dispatch (the leak check needs it even after a restart).
+  expect(run).toMatch(/artifacts: \n    .*runs\/w1\.1-r1\/context\.md$/);
 
   expect(() => show(k.engine, "nope")).toThrow(/nothing matches 'nope'/);
   expect(() => pause(k.engine, "w1.1")).toThrow(/pause takes a task, not w1.1 \(w1 is running\)/);
