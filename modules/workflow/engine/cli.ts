@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { loadSpec, type Spec } from "./spec";
 import { readDoc, SpecError } from "./frontmatter";
 import { checkTask } from "./records";
-import { loadRunners } from "./runners";
+import { adaptersDir, loadRunners, type RunnerCode } from "./runners";
 import { parseCommand, UsageError } from "./args";
 import { call, request, NotRunning } from "./client";
-import { available } from "./engine";
+import { VERSION } from "./paths";
+import { available } from "./plans";
 import { brainRoot, socketPath, stateDir } from "./paths";
 
 export const specDir = (): string => process.env.WF_SPEC || join(import.meta.dir, "..", "spec");
@@ -15,15 +16,17 @@ export const specDir = (): string => process.env.WF_SPEC || join(import.meta.dir
 const EXIT = { done: 0, failed: 1, blocked: 3 } as Record<string, number>;
 
 function help(spec: Spec): string {
-  const live = [...spec.commands.values()].filter(available);
+  const live = [...spec.commands.values()].filter((c) => available(spec, c));
+  const width = Math.max(...live.map((c) => c.example.length));
   return `wf — multi-agent workflow engine
 
-${live.map((c) => `  wf ${c.example.padEnd(46)} ${c.about}`).join("\n")}
+${live.map((c) => `  wf ${c.example.padEnd(width)}  ${c.about}`).join("\n")}
 
   options: ${live.flatMap((c) => c.options).filter((o, i, a) => a.indexOf(o) === i).join(", ")}
 
   wf report <run> <outcome> ["text"]   for workers: hand back a run's outcome (text or stdin)
   wf serve                             the engine itself (started on demand as hc terminal 'wf')
+  wf hook <runner>                     a runner's tool hook (registered by the Nix module)
   wf lint [<record.md>…]               check the spec, adapters and task records`;
 }
 
@@ -57,10 +60,22 @@ async function serveCmd(spec: Spec): Promise<number> {
   return 0;
 }
 
+/** `--escaped`: the text came on one line with \n, \t and \\ escapes (for single-line shells). */
+export const unescape = (t: string): string => t.replace(/\\(n|t|\\)/g, (_, c: string) => (c === "n" ? "\n" : c === "t" ? "\t" : "\\"));
+
+/** stdin, unless nothing arrives in time: a shell that drops a heredoc must not hang the worker. */
+async function stdinText(ms = 10_000): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  return Promise.race([Bun.stdin.text(), Bun.sleep(ms).then(() => "")]);
+}
+
 async function reportCmd(rest: string[]): Promise<number> {
-  const [run, outcome, ...words] = rest;
-  if (!run || !outcome) throw new UsageError('usage: wf report <run> <outcome> ["text"]  (or text on stdin)');
-  const text = words.length ? words.join(" ") : process.stdin.isTTY ? "" : await Bun.stdin.text();
+  const escaped = rest.includes("--escaped");
+  const [run, outcome, ...words] = rest.filter((w) => w !== "--escaped");
+  if (!run || !outcome) throw new UsageError('usage: wf report <run> <outcome> [--escaped] ["text"]  (or text on stdin)');
+  const raw = words.length ? words.join(" ") : await stdinText();
+  if (!raw.trim()) throw new UsageError(`no report text: pass it as one quoted argument, e.g. wf report ${run} ${outcome} "…"`);
+  const text = escaped ? unescape(raw) : raw;
   // Never start an engine for a report: a worker belongs to the engine that started it.
   const r = await request({ op: "report", run, outcome, text }).catch((e: Error) => {
     if (e instanceof NotRunning) throw new Error(`the engine that started ${run} is not reachable at ${socketPath()}`);
@@ -71,11 +86,28 @@ async function reportCmd(rest: string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * `wf hook <runner>`: a CLI's tool hook. Loads only that runner's code (no spec), and fails closed
+ * inside a wf run: any error denies, since a silent hook would let the call through.
+ */
+async function hookCmd(name: string | undefined): Promise<number> {
+  try {
+    const code = (await import(join(adaptersDir(), "runners", name ?? "", "runner.ts"))) as RunnerCode;
+    if (!code.hook) throw new Error(`runner '${name}' has no hook`);
+    process.stdout.write(code.hook(await Bun.stdin.text(), process.env));
+    return 0;
+  } catch (e) {
+    if (process.env.WF_GUARD) process.stdout.write(JSON.stringify({ decision: "deny", reason: `wf guard failed: ${(e as Error).message}` }));
+    console.error(`wf hook: ${(e as Error).message}`);
+    return process.env.WF_GUARD ? 0 : 2;
+  }
+}
+
 async function submitCmd(spec: Spec, argv: string[]): Promise<number> {
-  if (!available(spec.commands.get(argv[0])!)) throw new UsageError(`'${argv[0]}' is not available yet`);
+  if (!available(spec, spec.commands.get(argv[0])!)) throw new UsageError(`'${argv[0]}' is not available yet`);
   const submit = parseCommand(spec, argv, process.cwd(), process.env);
   const to = submit.options["report-to"];
-  const r = await call({ op: "submit", submit, wait: !to });
+  const r = await call({ op: "submit", submit, wait: !to }, VERSION);
   if (!r.ok) return console.error(`wf ${argv[0]}: ${r.error}`), 1;
   if (to) return console.log(`${r.task} started; the result goes to ${to}`), 0;
   console.log(`${r.task} ${r.status}\n\n${r.text}`);
@@ -84,6 +116,7 @@ async function submitCmd(spec: Spec, argv: string[]): Promise<number> {
 
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  if (cmd === "hook") return hookCmd(rest[0]);
   try {
     const spec = loadSpec(specDir());
     if (cmd === "lint") return await lint(spec, rest);

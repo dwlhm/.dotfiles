@@ -27,7 +27,7 @@ commands:
   compare:
     about: Ask several agents the same question and compare their answers
     example: compare "best cache design for X" with claude opencode agy
-    roles: [research]
+    roles: [research, summarize]
     result: report
     many: true
     options: [in, about, with, report-to]
@@ -47,3 +47,8 @@ takes: [folder, paths, command, agents, terminal, nothing]
 The words the user types. Each command names the roles that do the work and the kind of result;
 options are plain words with one concrete argument. Internal names (roles, tiers, policy) never
 show up in what the user types.
+
+`roles` are stages, in order: each stage works on what the one before produced. With `many: true`
+the first stage runs once per agent (the agents in `with`, else one per eligible agent, at most
+three), independently; an agent that cannot answer drops out instead of blocking the task. There
+`with` names the agents being compared; the later stages pick the cheapest eligible agent.

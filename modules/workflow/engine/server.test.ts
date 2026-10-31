@@ -6,6 +6,7 @@ import { connect } from "node:net";
 import { makeEngine, settle } from "./testkit";
 import { serve } from "./server";
 import { request, NotRunning } from "./client";
+import { VERSION } from "./paths";
 
 const sock = () => join(mkdtempSync(join(tmpdir(), "wf-s-")), "wf.sock");
 const ask = { command: "ask", goal: "q?", folder: "/tmp", options: {} };
@@ -14,7 +15,7 @@ test("submit waits for the answer that a worker reports over the same socket", a
   const k = await makeEngine();
   const path = sock();
   const running = await serve(k.engine.d, path);
-  expect(await request({ op: "ping" }, path)).toEqual({ ok: true, active: 0 });
+  expect(await request({ op: "ping" }, path)).toEqual({ ok: true, active: 0, version: VERSION });
   const answer = request({ op: "submit", submit: ask, wait: true }, path);
   await settle();
   expect(await request({ op: "report", run: "w1.1-r1", outcome: "done", text: "42" }, path)).toEqual({ ok: true });
@@ -52,4 +53,18 @@ test("nothing listening is NotRunning (safe to start and resend); garbage gets a
   expect(JSON.parse(reply)).toEqual({ ok: false, error: "malformed request" });
   expect(await request({ op: "nope" }, path)).toEqual({ ok: false, error: "unknown request 'nope'" });
   await running.stop();
+});
+
+test("quit is refused while runs are active and stops an idle engine", async () => {
+  const k = await makeEngine();
+  const path = sock();
+  const running = await serve(k.engine.d, path);
+  await request({ op: "submit", submit: ask, wait: false }, path);
+  await settle();
+  expect(await request({ op: "quit" }, path)).toEqual({ ok: false, error: "1 run(s) still active" });
+  await request({ op: "report", run: "w1.1-r1", outcome: "done", text: "ok" }, path);
+  expect(await request({ op: "quit" }, path)).toEqual({ ok: true });
+  await running.done;
+  expect(existsSync(path)).toBe(false);
+  await expect(request({ op: "ping" }, path)).rejects.toBeInstanceOf(NotRunning);
 });

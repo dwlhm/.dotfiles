@@ -30,13 +30,20 @@ export class Store {
       .flatMap((m) => readdirSync(join(dir, m)).filter((f) => /^w\d+\.md$/.test(f)).map((f) => join(dir, m, f)));
   }
 
-  /** The next task id: one above every record ever written. */
-  nextId(): string {
+  /** The number the next task id will have, without taking it. */
+  peekId(): number {
     if (!this.next) {
       const nums = this.files().map((f) => parseId(f.split("/").pop()!.slice(0, -3))?.task ?? 0);
       this.next = Math.max(0, ...nums) + 1;
     }
-    return `w${this.next++}`;
+    return this.next;
+  }
+
+  /** The next task id: one above every record ever written. */
+  nextId(): string {
+    const n = this.peekId();
+    this.next = n + 1;
+    return `w${n}`;
   }
 
   path(task: Task): string {

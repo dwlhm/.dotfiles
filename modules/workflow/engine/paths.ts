@@ -2,6 +2,9 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/** Which wf code this process runs: its engine folder (a Nix store path once installed). */
+export const VERSION = import.meta.dir;
+
 export const brainRoot = (): string => process.env.WF_BRAIN || join(homedir(), "brain");
 export const stateDir = (): string => process.env.WF_STATE || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "wf");
 export const socketPath = (): string => join(stateDir(), "wf.sock");

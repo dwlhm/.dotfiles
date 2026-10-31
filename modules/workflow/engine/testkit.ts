@@ -47,6 +47,7 @@ export class FakeHost implements Host {
 export const fakeRunner = (name: string, models: string[], over: Partial<Runner> = {}): Runner => ({
   name,
   enforces: ["read", "edit", "shell-report", "shell-check", "shell-git-read", "shell-qa", "network"],
+  multiline: true,
   trust: false,
   models: models.map((id) => ({ id, tier: "small", cost: 0 })),
   code: { launch: (i) => ({ argv: [name, "--model", i.model, i.prompt], env: { RUNNER_ONLY: "1" } }) } satisfies RunnerCode,

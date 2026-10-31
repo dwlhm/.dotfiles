@@ -6,7 +6,7 @@ import { readDoc, SpecError } from "./frontmatter";
 import { Check } from "./check";
 import type { Role, Spec } from "./spec";
 
-export type LaunchInput = { model: string; prompt: string; can: string[]; check?: string };
+export type LaunchInput = { model: string; prompt: string; cwd: string; can: string[]; check?: string };
 export type Status = { state: string; kind?: string };
 export type Launch = { argv: string[]; env?: Record<string, string> };
 
@@ -14,14 +14,23 @@ export type Launch = { argv: string[]; env?: Record<string, string> };
 export type RunnerCode = {
   /** The program for the terminal: prompt as the CLI's first message, permissions from `can`. */
   launch(i: LaunchInput): Launch;
-  /** Mark `cwd` as trusted ahead of launch (runners whose runner.md says `trust: true`). */
+  /**
+   * Make sure the CLI trusts `cwd` before launch (runners whose runner.md says `trust: true`):
+   * grant it per run when the CLI allows, else throw with the fix (the run becomes `infra`).
+   */
   trust?(cwd: string): Promise<void>;
+  /**
+   * For CLIs whose only strict enforcement is a hook: `wf hook <runner>` passes the hook's stdin
+   * and env; the return value is printed as the hook's reply ("" = no opinion).
+   */
+  hook?(input: string, env: Record<string, string | undefined>): string;
   /** Extra startup noise beyond the engine's rule (any status before the first `working`). */
   noise?(s: Status): boolean;
 };
 
 export type Model = { id: string; tier: string; cost: number };
-export type Runner = { name: string; enforces: string[]; trust: boolean; models: Model[]; code: RunnerCode };
+/** `multiline`: whether the CLI runs a shell command spanning several lines (heredocs, quoted newlines). */
+export type Runner = { name: string; enforces: string[]; multiline: boolean; trust: boolean; models: Model[]; code: RunnerCode };
 export type Choice = { runner: Runner; model: Model };
 
 export const adaptersDir = (): string => process.env.WF_ADAPTERS || join(import.meta.dir, "..", "adapters");
@@ -45,13 +54,15 @@ async function loadRunner(dir: string, spec: Spec, errors: string[]): Promise<Ru
   if (doc.data.name !== name) c.fail("name", `must be the folder name '${name}'`);
   const enforces = c.names(doc.data, "enforces", spec.vocab.capabilities);
   const trust = c.flag(doc.data, "trust") ?? false;
+  if (typeof doc.data.multiline !== "boolean") c.fail("multiline", "must say true or false: can the CLI run a multi-line shell command?");
+  const multiline = doc.data.multiline === true;
   const models = loadModels(c, doc.data, spec);
   const codeFile = join(dir, "runner.ts");
   if (!existsSync(codeFile)) return c.fail("runner.ts", "is missing"), undefined;
   const code = (await import(codeFile)) as RunnerCode;
   if (typeof code.launch !== "function") c.fail("runner.ts", "must export launch()");
   if (trust && typeof code.trust !== "function") c.fail("runner.ts", "trust: true needs an exported trust()");
-  return { name, enforces, trust, models, code };
+  return { name, enforces, multiline, trust, models, code };
 }
 
 export async function loadRunners(spec: Spec, root = adaptersDir()): Promise<Map<string, Runner>> {

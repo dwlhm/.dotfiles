@@ -14,16 +14,13 @@ function contextBlock(sections: Section[]): string {
   return `<private-context>\n${PRIVATE_NOTE}\n\n${body}\n</private-context>`;
 }
 
-function reportBlock(role: Role, vocab: Vocab, run: string): string {
-  const lines = role.reports.map((o) => `  wf report ${run} ${o} "<text>"   # ${vocab.outcomes.get(o)?.about ?? ""}`);
-  return [
-    "When you finish, hand back the outcome with exactly one of these commands, then stop:",
-    ...lines,
-    "For long or multi-line text pass it on stdin instead:",
-    `  wf report ${run} done <<'WF'`,
-    "  …",
-    "  WF",
-  ].join("\n");
+function reportBlock(role: Role, vocab: Vocab, run: string, multiline: boolean): string {
+  const flag = multiline ? "" : " --escaped";
+  const lines = role.reports.map((o) => `  wf report ${run} ${o}${flag} "<text>"   # ${vocab.outcomes.get(o)?.about ?? ""}`);
+  const long = multiline
+    ? ["For long or multi-line text pass it on stdin instead:", `  wf report ${run} done <<'WF'`, "  …", "  WF"]
+    : ["Your shell runs only single-line commands: keep the whole command on ONE line and write each line break inside the text as \\n (--escaped turns them back)."];
+  return ["When you finish, hand back the outcome with exactly one of these commands, then stop:", ...lines, ...long].join("\n");
 }
 
 function fill(template: string, vars: Vars): string {
@@ -34,8 +31,8 @@ function fill(template: string, vars: Vars): string {
   });
 }
 
-export function renderPrompt(o: { role: Role; vocab: Vocab; vars: Vars; context: Section[]; run: string }): string {
+export function renderPrompt(o: { role: Role; vocab: Vocab; vars: Vars; context: Section[]; run: string; multiline: boolean }): string {
   for (const need of o.role.needs) if (o.vars[need] === undefined) throw new Error(`role ${o.role.name} needs '${need}'`);
   const body = fill(o.role.prompt, { ...o.vars, context: contextBlock(o.context) });
-  return `${body.trim()}\n\n${reportBlock(o.role, o.vocab, o.run)}\n`;
+  return `${body.trim()}\n\n${reportBlock(o.role, o.vocab, o.run, o.multiline)}\n`;
 }

@@ -56,10 +56,31 @@ async function start(): Promise<void> {
   if (r.code !== 0 && !(await live(name))) throw new Error(`could not start wf serve: ${r.err || r.out.trim()}`);
 }
 
-/** Send `req`, starting the engine first when nothing answers. */
-export async function call(req: object): Promise<Reply> {
+/**
+ * An engine running older wf code (from before a `nix sync`) is replaced when idle; a busy one is
+ * kept, and this call is served by it, with a warning.
+ */
+async function current(version: string): Promise<boolean> {
+  const ping = await request({ op: "ping" });
+  if (ping.version === version) return true;
+  if (Number(ping.active)) {
+    console.error(`wf: the running engine is an older wf with ${ping.active} active run(s); it is replaced once idle`);
+    return true;
+  }
+  // An engine older than the quit request answers it with an error; idle, it is safe to end.
+  if (!(await request({ op: "quit" })).ok) await hc(["kill", engineName()]);
+  for (let i = 0; i < 25; i++) {
+    await Bun.sleep(100);
+    if (!(await live(engineName()))) return false;
+  }
+  throw new Error(`the old engine did not quit; see \`hc read ${engineName()}\``);
+}
+
+/** Send `req`, starting (or replacing an outdated) engine first when needed. */
+export async function call(req: object, version: string): Promise<Reply> {
   try {
-    return await request(req);
+    if (await current(version)) return await request(req);
+    await start();
   } catch (e) {
     if (!(e instanceof NotRunning)) throw e;
     await start();

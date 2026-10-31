@@ -1,6 +1,7 @@
 ---
 name: opencode
 enforces: [read, edit, shell-report, shell-check, shell-git-read, shell-qa, network]
+multiline: true
 trust: false
 models:
   - id: opencode/deepseek-v4.1-flash-free

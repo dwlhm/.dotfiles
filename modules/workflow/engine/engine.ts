@@ -1,18 +1,19 @@
-// Task lifecycle: submit → dispatch a run on the cheapest eligible runner → report or infra →
-// fallback → close. One writer (this class); terminals are asked for, never mirrored.
-import { mkdirSync, writeFileSync } from "node:fs";
+// Task lifecycle: submit → plan steps → dispatch each step whose inputs are ready on the cheapest
+// eligible runner → report or infra → fallback → advance → close. One writer (this class);
+// terminals are asked for, never mirrored. A step's result text lives in its run's report.md.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Spec } from "./spec";
-import type { Command } from "./commands";
 import type { Host } from "./host";
 import { terminalName } from "./host";
 import type { Knowledge } from "./knowledge";
 import type { Store } from "./store";
 import type { Task, Step, Run } from "./records";
 import { choices, type Choice, type Runner } from "./runners";
-import { renderPrompt, type Vars } from "./prompt";
-import { runId, stepId } from "./ids";
+import { renderPrompt } from "./prompt";
+import { runId } from "./ids";
 import { wfEnv } from "./paths";
+import { available, enoughInput, laterWith, planSteps, resultOf, varsFor, why, type Finished } from "./plans";
 
 export type Deps = {
   spec: Spec;
@@ -28,9 +29,7 @@ export type Active = { task: Task; step: Step; run: Run; working: boolean; nudge
 export type Result = { task: Task; text: string };
 export type Submit = { command: string; goal: string; folder: string; options: Record<string, unknown> };
 
-/** Commands this engine can run so far: one role, one runner, an answer. */
-export const available = (c: Command): boolean => c.roles.length === 1 && !c.many && c.result === "answer";
-
+const ENDED = ["done", "failed", "stopped"];
 const firstLine = (t: string) => (t.trim().split("\n")[0] ?? "").slice(0, 200);
 
 export class Engine {
@@ -40,25 +39,20 @@ export class Engine {
   constructor(readonly d: Deps) {}
 
   private stamp = () => this.d.now().toISOString().replace(/\.\d{3}Z$/, "Z");
+  private cmd = (task: Task) => this.d.spec.commands.get(task.command)!;
 
   submit(s: Submit): Task {
     const cmd = this.d.spec.commands.get(s.command);
     if (!cmd) throw new Error(`unknown command '${s.command}'`);
-    if (!available(cmd)) throw new Error(`'${s.command}' is not available yet`);
-    for (const name of (s.options.with as string[] | undefined) ?? []) {
-      if (!this.d.runners.has(name)) throw new Error(`unknown agent '${name}' (known: ${[...this.d.runners.keys()].join(", ")})`);
-    }
-    const role = this.d.spec.roles.get(cmd.roles[0])!;
-    if (!choices(role, this.d.runners, this.d.spec.vocab.tiers, (s.options.with as string[]) ?? []).length) {
-      throw new Error(`no ${(s.options.with as string[])?.join("/") || "agent"} can do '${s.command}' (it needs: ${role.can.join(", ")})`);
-    }
+    if (!available(this.d.spec, cmd)) throw new Error(`'${s.command}' is not available yet`);
+    const wanted = (s.options.with as string[] | undefined) ?? [];
+    const steps = planSteps(this.d.spec, this.d.runners, cmd, this.d.store.peekId(), s.goal, wanted);
     const id = this.d.store.nextId();
-    const step: Step = { id: stepId(Number(id.slice(1)), [1]), title: s.goal, role: cmd.roles[0], only: [], deps: [], status: "queued", runs: [], steps: [] };
-    const task: Task = { id, command: s.command, goal: s.goal, folder: s.folder, options: s.options, status: "running", created: this.stamp(), closed: null, steps: [step], answers: [] };
+    const task: Task = { id, command: s.command, goal: s.goal, folder: s.folder, options: s.options, status: "running", created: this.stamp(), closed: null, steps, answers: [] };
     this.d.store.save(task, `# ${s.goal}`);
     void this.d.store.commit(task);
     this.d.log(`${id} ${s.command}: ${s.goal}`);
-    this.dispatch(task, step);
+    this.advance(task);
     return task;
   }
 
@@ -66,24 +60,46 @@ export class Engine {
   remaining(task: Task, step: Step): Choice[] {
     const role = this.d.spec.roles.get(step.role)!;
     const tried = new Set(step.runs.map((r) => `${r.runner} ${r.model}`));
-    const only = (task.options.with as string[] | undefined) ?? [];
+    const only = step.with ?? laterWith(this.cmd(task), (task.options.with as string[] | undefined) ?? []);
     return choices(role, this.d.runners, this.d.spec.vocab.tiers, only).filter((c) => !tried.has(`${c.runner.name} ${c.model.id}`));
   }
 
-  vars(task: Task): Vars {
-    return { question: task.goal, about: (task.options.about as string[] | undefined) ?? ["the whole folder"], goal: task.goal };
+  /** Finished steps (of `ids`, else all) with their result text, read back from the run artifacts. */
+  finished(task: Task, ids?: string[]): Finished[] {
+    return task.steps
+      .filter((s) => s.status === "done" && (!ids || ids.includes(s.id)))
+      .flatMap((step) => {
+        const run = [...step.runs].reverse().find((r) => r.outcome === "done");
+        const file = run && join(this.d.state, "runs", run.id, "report.md");
+        return file && existsSync(file) ? [{ step, agent: run.runner, text: readFileSync(file, "utf8") }] : [];
+      });
+  }
+
+  /** Start every step whose inputs are ready; close the task when nothing is left to run. */
+  advance(task: Task): void {
+    for (const step of task.steps.filter((s) => s.status === "queued")) {
+      const deps = task.steps.filter((s) => step.deps.includes(s.id));
+      if (!deps.every((s) => ENDED.includes(s.status))) continue;
+      if (deps.length && !enoughInput(this.cmd(task), this.finished(task, step.deps))) step.status = "stopped";
+      else this.dispatch(task, step);
+    }
+    if (task.steps.some((s) => s.status === "running" || s.status === "paused") || task.status !== "running") return void this.d.store.save(task);
+    if (task.steps.some((s) => s.status === "queued")) return void this.d.store.save(task);
+    const r = resultOf(this.cmd(task), task.steps, new Map(this.finished(task).map((f) => [f.step.id, f])));
+    this.close(task, r.status, r.text);
   }
 
   dispatch(task: Task, step: Step): void {
     const next = this.remaining(task, step)[0];
     if (!next) {
-      const why = step.runs.map((r) => `${r.runner}·${r.model}: ${r.summary ?? r.outcome}`).join("; ");
-      return void this.close(task, step, "failed", `No runner left for this step.${why ? ` Tried: ${why}` : ""}`);
+      step.status = "failed";
+      this.d.log(`${step.id} failed: ${why(step)}`);
+      return;
     }
     const role = this.d.spec.roles.get(step.role)!;
     const id = runId(step.id, step.runs.length + 1);
     const context = this.d.knowledge.context({ folder: task.folder, paths: (task.options.about as string[]) ?? [], goal: task.goal, budget: this.d.spec.policy.limits.context_bytes });
-    const prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars: this.vars(task), context, run: id });
+    const prompt = renderPrompt({ role, vocab: this.d.spec.vocab, vars: varsFor(task, this.finished(task, step.deps)), context, run: id, multiline: next.runner.multiline });
     const run: Run = { id, runner: next.runner.name, model: next.model.id, terminal: null, started: this.stamp(), ended: null, outcome: null };
     step.runs.push(run);
     step.status = "running";
@@ -95,7 +111,7 @@ export class Engine {
     const role = this.d.spec.roles.get(a.step.role)!;
     try {
       if (c.runner.trust) await c.runner.code.trust!(a.task.folder);
-      const l = c.runner.code.launch({ model: c.model.id, prompt, can: role.can, check: a.step.check });
+      const l = c.runner.code.launch({ model: c.model.id, prompt, cwd: a.task.folder, can: role.can, check: a.step.check });
       const env = { ...wfEnv(), ...l.env };
       a.run.terminal = await this.d.host.spawn({ name: terminalName(a.run.id), cwd: a.task.folder, argv: l.argv, env, labels: { "wf.run": a.run.id } });
       this.d.store.save(a.task);
@@ -115,7 +131,7 @@ export class Engine {
     await this.finish(a, outcome, text);
   }
 
-  /** End a run: keep its screen, close its terminal, then move the step on. */
+  /** End a run: keep its screen, close its terminal, then move the step and the task on. */
   async finish(a: Active, outcome: string, text: string): Promise<void> {
     if (!this.active.delete(a.run.id)) return;
     const dir = join(this.d.state, "runs", a.run.id);
@@ -127,16 +143,20 @@ export class Engine {
     }
     Object.assign(a.run, { ended: this.stamp(), outcome, summary: firstLine(text) });
     this.d.log(`${a.run.id} ${outcome}: ${firstLine(text)}`);
-    if (outcome === "infra") return this.dispatch(a.task, a.step);
-    if (outcome === "done") return this.close(a.task, a.step, "done", text);
-    this.close(a.task, a.step, "blocked", text);
+    const { task, step } = a;
+    const cmd = this.cmd(task);
+    if (outcome === "infra") this.dispatch(task, step);
+    else if (outcome === "done") step.status = "done";
+    else if (cmd.many && step.role === cmd.roles[0]) step.status = "failed"; // one agent drops out
+    else return this.close(task, "blocked", text, step);
+    this.advance(task);
   }
 
-  close(task: Task, step: Step, status: "done" | "failed" | "blocked", text: string): void {
-    step.status = status === "blocked" ? "paused" : status;
+  close(task: Task, status: "done" | "failed" | "blocked", text: string, waiting?: Step): void {
+    if (waiting) waiting.status = "paused";
     task.status = status;
     task.closed = status === "blocked" ? null : this.stamp();
-    const title = { done: "Answer", failed: "Failed", blocked: "Needs you" }[status];
+    const title = { done: this.cmd(task).many ? "Report" : "Answer", failed: "Failed", blocked: "Needs you" }[status];
     this.d.store.save(task, `# ${task.goal}\n\n## ${title}\n\n${text.trim()}`);
     void this.d.store.commit(task);
     this.d.log(`${task.id} ${status}`);
@@ -155,16 +175,13 @@ export class Engine {
   /** After a restart: runs the old engine left open died with it (they were its children). */
   async recover(): Promise<void> {
     for (const task of this.d.store.open().filter((t) => t.status === "running")) {
-      for (const step of task.steps.filter((s) => s.status === "running")) {
-        const open = step.runs.find((r) => r.ended === null);
-        if (!open) {
-          this.dispatch(task, step);
-          continue;
-        }
-        const a: Active = { task, step, run: open, working: false, nudged: 0 };
-        this.active.set(open.id, a);
+      const open = task.steps.flatMap((step) => step.runs.filter((r) => r.ended === null).map((run) => ({ step, run })));
+      for (const { step, run } of open) {
+        const a: Active = { task, step, run, working: false, nudged: 0 };
+        this.active.set(run.id, a);
         await this.finish(a, "infra", "the engine restarted while this run was open");
       }
+      if (!open.length) this.advance(task);
     }
   }
 }

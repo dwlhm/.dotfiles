@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ config, pkgs, lib, ... }:
 
 let
   # Runtime files only: tests and their kit stay in the repo.
@@ -29,4 +29,19 @@ in
   # Multi-agent workflow engine (see README.md). Config only: records live in ~/brain/tasks,
   # runtime state in ~/.local/state/wf.
   home.packages = [ wf ];
+
+  # agy's only strict enforcement is a PreToolUse hook (adapters/runners/agy). hooks.json is shared
+  # with other integrations, so merge our "wf-worker" key instead of owning the file. The hook is
+  # silent outside wf runs.
+  home.activation.wfAgyHook = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    agyConfig="${config.home.homeDirectory}/.gemini/config"
+    if [ -d "$agyConfig" ]; then
+      hooks="$agyConfig/hooks.json" merged=$(mktemp)
+      { [ -s "$hooks" ] && cat "$hooks" || echo '{}'; } | ${pkgs.jq}/bin/jq \
+        --arg c "${wf}/bin/wf hook agy" \
+        '. + {"wf-worker": {PreToolUse: [{matcher: "*", hooks: [{command: $c, timeout: 10}]}]}}' > "$merged"
+      run cp "$merged" "$hooks"
+      rm -f "$merged"
+    fi
+  '';
 }

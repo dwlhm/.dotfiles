@@ -6,14 +6,20 @@ import type { Socket } from "bun";
 import { Engine, type Deps } from "./engine";
 import { watch } from "./watch";
 import { request } from "./client";
+import { VERSION } from "./paths";
 
 export type Request =
   | { op: "ping" }
+  | { op: "quit" }
   | { op: "submit"; submit: import("./engine").Submit; wait: boolean }
   | { op: "report"; run: string; outcome: string; text: string };
 
 async function handle(e: Engine, req: Request): Promise<Record<string, unknown>> {
-  if (req.op === "ping") return { ok: true, active: e.active.size };
+  if (req.op === "ping") return { ok: true, active: e.active.size, version: VERSION };
+  if (req.op === "quit") {
+    if (e.active.size) return { ok: false, error: `${e.active.size} run(s) still active` };
+    return { ok: true }; // the engine stops once this reply is out
+  }
   if (req.op === "report") {
     await e.report(req.run, req.outcome, req.text);
     return { ok: true };
@@ -45,12 +51,9 @@ async function claim(path: string): Promise<void> {
 
 export type Running = { stop(): Promise<void>; done: Promise<void> };
 
-export async function serve(d: Deps, path: string): Promise<Running> {
-  await claim(path);
-  const e = new Engine(d);
-  await e.recover();
-  let stopping = false;
-  const server = Bun.listen<{ buf: string }>({
+/** One JSON line in, one JSON line out; `onQuit` runs once an accepted quit's reply is out. */
+function listen(e: Engine, path: string, onQuit: () => void) {
+  return Bun.listen<{ buf: string }>({
     unix: path,
     socket: {
       open: (s) => void (s.data = { buf: "" }),
@@ -64,20 +67,37 @@ export async function serve(d: Deps, path: string): Promise<Running> {
         } catch {
           return reply(s, { ok: false, error: "malformed request" });
         }
-        handle(e, req).then((r) => reply(s, r), (err) => reply(s, { ok: false, error: (err as Error).message }));
+        handle(e, req).then(
+          (r) => {
+            reply(s, r);
+            if (req.op === "quit" && r.ok) onQuit();
+          },
+          (err) => reply(s, { ok: false, error: (err as Error).message }),
+        );
       },
     },
   });
+}
+
+export async function serve(d: Deps, path: string): Promise<Running> {
+  await claim(path);
+  const e = new Engine(d);
+  await e.recover();
+  let stopping = false;
+  const server = listen(e, path, () => {
+    d.log("quitting: a newer wf asked to take over");
+    void running.stop();
+  });
   d.log(`ready on ${path}`);
-  const done = watch(e, () => stopping);
-  return {
-    done,
+  const running: Running = {
+    done: watch(e, () => stopping),
     // Records are already on disk; pending brain commits get a moment, never a hang.
     async stop() {
       stopping = true;
-      server.stop(true);
+      server.stop(); // let replies already being written finish
       if (existsSync(path)) unlinkSync(path);
       await Promise.race([d.store.flushed(), Bun.sleep(2000)]);
     },
   };
+  return running;
 }

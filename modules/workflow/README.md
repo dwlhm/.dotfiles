@@ -45,11 +45,20 @@ up in what the user types. The source of truth is `spec/commands.md`.
 ### Runner adapter contract
 
 `runner.md` states the facts: `enforces` (capabilities it can enforce; a runner is eligible for a
-role only when it enforces all of the role's `can`), `trust` and `models` (tier and cost).
-`runner.ts` exports `launch(model, prompt, can, check) → { argv, env }` (first prompt and
-permissions), plus `trust(cwd)` when `trust: true` and an optional `noise(status)` filter. The
-fallback order is derived (cheapest eligible tier first), never written by hand; a retry or
-fallback is a new run.
+role only when it enforces all of the role's `can`), `multiline` (whether the CLI runs a
+multi-line shell command; if not, workers report on one line with `--escaped`), `trust` and
+`models` (tier and cost). `runner.ts` exports `launch(model, prompt, cwd, can, check) → { argv,
+env }` (first prompt, permissions, per-run trust where the CLI allows it), plus `trust(cwd)` when
+`trust: true` (check, or throw with the fix), an optional `noise(status)` filter and an optional
+`hook(stdin, env)` for CLIs whose only strict enforcement is a tool hook (`wf hook <runner>`,
+registered by the Nix module, silent outside wf runs, fails closed inside them). The fallback order
+is derived (cheapest eligible tier first), never written by hand; a retry or fallback is a new run.
+
+| Runner | Isolation | Trust |
+|---|---|---|
+| `opencode` | `OPENCODE_CONFIG_CONTENT` permission rules, `--standalone` server per run | none needed |
+| `claude` | `--restricted --strict-mcp-config --tools … --allowedTools … --permission-mode dontAsk` | read from `~/.claude.json` (inherited by subfolders); never written |
+| `agy` | `wf-worker` PreToolUse hook denies outside the role; `--settings` allows the role's commands | `--settings trustedWorkspaces` for that session |
 
 ### Host adapter contract
 
@@ -88,9 +97,15 @@ of why an earlier run failed is kept.
 
 ## The engine process
 
+Stages: a command's `roles` run in order, each on what the previous produced; with `many: true`
+the first stage runs once per agent in parallel (`compare`), and the later stages pick the
+cheapest eligible agent. A command is available once the engine can fill every prompt variable its
+roles need (`engine/plans.ts`), so commands switch on as their inputs are built.
+
 `wf serve` is one long-lived hc terminal (`wf` for the default state, `wf-<hash>` for another
 `WF_STATE`); any `wf <command>` starts it when nothing answers on `~/.local/state/wf/wf.sock`
-(concurrent clients share one). Workers are its children and die with it; on restart, runs left
+(concurrent clients share one; an idle engine running older wf code is replaced). Workers are its
+children and die with it; on restart, runs left
 open become `infra` and their step moves on. `wf report` never starts an engine.
 
 ## Checks

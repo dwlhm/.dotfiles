@@ -25,6 +25,8 @@ export type Step = {
   only: string[];
   check?: string;
   deps: string[];
+  /** Agents this step may run on (one per step of a `many` command); else the task's `with`. */
+  with?: string[];
   status: string;
   runs: Run[];
   steps: Step[];
@@ -93,6 +95,7 @@ function checkStep(parent: RecordCheck, s: Record<string, unknown>, expected: st
   c.oneOf(s, "status", STEP_STATUS);
   c.list(s, "only");
   c.text(s, "check", true);
+  for (const w of c.list(s, "with", true) ?? []) if (typeof w !== "string" || !w) c.fail("with", `${JSON.stringify(w)} is not an agent name`);
   for (const d of c.list(s, "deps") ?? []) {
     if (typeof d !== "string" || !c.stepIds.has(d) || d === expected) c.fail("deps", `${JSON.stringify(d)} is not another step of this task`);
   }
