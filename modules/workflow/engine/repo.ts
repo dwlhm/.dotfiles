@@ -137,6 +137,26 @@ export async function mergeInto(intWt: string, branch: string, message: string, 
   return { conflicts: files };
 }
 
+/** What `wf merge` did: the merge commit, or the files that conflicted (the merge was aborted). */
+export type UserMerge = { commit: string } | { conflicts: string[] };
+
+/**
+ * `wf merge`: merge `branch` into the user's current branch. Only a clean checkout is touched, and
+ * a conflict is aborted so the user's branch and index are left exactly as they were.
+ */
+export async function mergeUserBranch(root: string, branch: string, x: Exec = exec): Promise<UserMerge> {
+  const status = await x("git", ["-C", root, "status", "--porcelain=v1", "-uall"], root);
+  if (status.code) throw new Error(`git status failed: ${status.err || status.out.trim()}`);
+  if (status.out.trim()) throw new Error("your working tree has uncommitted changes; commit or stash them first");
+  if ((await x("git", ["-C", root, "rev-parse", "--verify", "-q", "HEAD"], root)).code) throw new Error("this repository has no commit yet");
+  if ((await x("git", ["-C", root, "rev-parse", "--verify", "-q", `refs/heads/${branch}`], root)).code) throw new Error(`there is no ${branch} branch: nothing from wf to merge`);
+  if (await ok(x, root, "merge-base", "--is-ancestor", branch, "HEAD")) throw new Error(`${branch} has nothing new for your branch`);
+  if (await ok(x, root, "merge", "--no-ff", "-m", `Merge ${branch}`, branch)) return { commit: await git(x, root, "rev-parse", "--short", "HEAD") };
+  const files = (await x("git", ["-C", root, "diff", "--name-only", "--diff-filter=U"], root)).out.trim().split("\n").filter(Boolean);
+  await x("git", ["-C", root, "merge", "--abort"], root);
+  return { conflicts: files };
+}
+
 /** A split step's own worktree and branch: removed when they hold nothing (clean, no commits). */
 export async function dropIfEmpty(root: string, wt: string, branch: string, base: string, x: Exec = exec): Promise<void> {
   if (existsSync(wt) && !(await changed(wt, x)).length) await git(x, root, "worktree", "remove", wt);
