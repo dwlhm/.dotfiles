@@ -71,6 +71,7 @@ in
     ./modules/qa
     ./modules/docs
     ./modules/workflow
+    ./modules/board
   ];
 
   home.username = "dwlhm";
