@@ -1,6 +1,7 @@
 // New task dialog: title, brief, folder and (optionally) the agent that starts on it. With `from`
 // it makes a follow-up of that task (`board fork`): its folder, its agent forking its session by
-// default. In git the agent works in its own worktree; the checkbox lets it land its commits
+// default. Plan first (on by default) has the agent plan and wait for the person's approval
+// before it works. In git the agent works in its own worktree; a checkbox lets it land its commits
 // itself. The fields scroll; the error and the buttons below them always stay in view.
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState, Textarea, TextareaState } from "gpui-base";
@@ -17,6 +18,7 @@ export default class Compose {
     this.from = p.from ?? null;
     this.agent = this.from ? this.from.assignee?.agent ?? null : p.agent ?? Object.keys(this.programs)[0] ?? null;
     this.autoLand = false;
+    this.planFirst = true;
     this.error = "";
     this.busy = false;
     const clear = (_e, cx) => { this.error = ""; cx.notify(); };
@@ -43,6 +45,7 @@ export default class Compose {
       const args = this.from ? ["fork", this.from.id, "--brief", this.brief.value()] : ["add", "--cwd", folder, "--brief", this.brief.value()];
       if (this.agent) args.push("--agent", this.agent);
       if (this.autoLand) args.push("--auto-land");
+      if (this.planFirst) args.push("--plan");
       try {
         await board([...args, "--", title]);
         closeOverlay(props().overlay);
@@ -88,6 +91,10 @@ export default class Compose {
       // Segmented control: inner radius = outer (7) - padding (2).
       .child(this.field("Agent", h_flex().p(2).gap(2).rounded(R.control).bg(t.raised).self_start()
         .children([...Object.keys(this.programs), null].map((a) => this.agentOption(a, t)))))
+      .child(this.field("Plan", v_flex().gap(4)
+        .child(checkbox("plan-first", "Plan first", this.planFirst, (on, cx) => { this.planFirst = on; cx.notify(); }))
+        .child(div().text_size(TEXT.meta).text_color(t.dim)
+          .child(this.planFirst ? "The agent researches and hands you a plan; it starts the work once you approve it." : "The agent starts the work at once."))))
       .child(this.field("In git", v_flex().gap(4)
         .child(checkbox("auto-land", "The agent may commit straight to the branch", this.autoLand, (on, cx) => { this.autoLand = on; cx.notify(); }))
         .child(div().text_size(TEXT.meta).text_color(t.dim)

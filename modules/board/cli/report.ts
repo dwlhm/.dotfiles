@@ -3,7 +3,7 @@
 // Agents are asked for that shape (`--detail`, `--option`); free text from an agent that ignores it,
 // or from a task saved before reports had a shape, goes through the same parser.
 
-export const REPORTS = { done: "done", failed: "failed", question: "waiting", stuck: "waiting" } as const;
+export const REPORTS = { done: "done", failed: "failed", question: "waiting", stuck: "waiting", plan: "waiting" } as const;
 export type ReportStatus = keyof typeof REPORTS;
 export const isReportStatus = (s: string): s is ReportStatus => s in REPORTS;
 

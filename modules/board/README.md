@@ -15,6 +15,7 @@ The Herdr mod is the view; the `board` CLI is the only writer. Independent of `w
 | `assignee` | agent, live hc terminal, and its session id: `open` resumes with full context |
 | `worktree` | the task's own git checkout `{ top, target, path, branch, sub }`, or null outside git |
 | `auto_land` | its agent puts its commits on the target's branch itself; else the person lands them |
+| `approval` | plan first: `pending` until the person approves its agent's plan, then `approved`; null = work at once |
 | `commits` | the commits it handed over / landed: the record of what it changed |
 | `report` | the agent's last report while it stands (`cli/report.ts`): cleared by an answer or a phase change |
 | `inbox` | hand-backs that arrived while the agent was not running; sent first on resume |
@@ -36,6 +37,19 @@ with `forked_from: <id>`, in `<id>`'s folder, with `<id>`'s title and agent unle
 `assign`, the same agent forks the source's session when its CLI can fork one we can resume
 (`AgentSpec.fork`); any other agent starts fresh and its prompt carries the source's report and
 brief. The source only logs `forked into T7`.
+
+## Plan first (`cli/approval.ts`)
+
+`board add|fork … --plan` (the **Plan first** checkbox in the new task dialog, on by default; never
+a sub-task) makes `approval: pending`. Its agent's first prompt says to research and plan only, and
+to hand the plan back with `board report plan "<goal>" --detail "<plan>"`: the card waits on the
+person (**Plan · review it**). The board holds the gate, not the prompt: while pending, the agent's
+`phase work|review|test` and `report done` are refused (`question`, `stuck`, `failed` stay open).
+
+- **Approve** (`board approve T7`, the person only, only while a plan waits) → `approved`, phase
+  `work`, and the agent gets `[board] user approve: your plan is approved: …`.
+- **Ask for changes** (any answer) → the agent revises and reports `plan` again; still gated.
+- Moving the card by hand does not approve it.
 
 ## Worktrees (`cli/worktree.ts`)
 
@@ -68,7 +82,8 @@ agent how to use the board; nothing else needs configuring per agent.
 
 ## Reports (`cli/report.ts`)
 
-`board report <status> "<headline>" [--detail <markdown>] [--option <answer>]...` keeps
+`board report <status> "<headline>" [--detail <markdown>] [--option <answer>]...` (status: `done`,
+`failed`, `question`, `stuck`, or `plan` for a plan-first task, see above) keeps
 `{ status, headline, detail, options, at }`. The card shows the headline (the question, the
 blocker or the outcome, in one sentence); the dialog renders the detail as Markdown and, for a
 question, each option as a one-click answer (the first is the agent's recommendation) beside a
@@ -116,8 +131,8 @@ under the store folder (`watchFolder`), and notifies when a root task needs you 
 |---|---|
 | `~/.local/state/board/tasks/<id>.json` | one file per task (`BOARD_STATE` overrides the folder) |
 | `~/.local/state/board/worktrees/<repo>-<hash>/<task>` | the worktrees of running tasks in git |
-| `cli/` | store (locking, ids), ops, report (shape + parser), worktree, agents, terminal, protocol, CLI; `fake.ts` = the tests' fake hc (left out of the package) |
-| `mod/` | the Herdr mod: `main.js` (roles), `board.js`, `card.js`, `detail.js`, `report.js` (also Land), `changes.js` (commits), `compose.js`, `data.js`, `ui.js` |
+| `cli/` | store (locking, ids), ops, report (shape + parser), approval (plan first), worktree, agents, terminal, protocol, CLI; `fake.ts` = the tests' fake hc (left out of the package) |
+| `mod/` | the Herdr mod: `main.js` (roles), `board.js`, `card.js`, `detail.js`, `report.js` (also Land and Approve plan), `changes.js` (commits), `compose.js`, `data.js`, `ui.js` |
 
 ## Checks
 

@@ -1,4 +1,4 @@
-// Task detail dialog: move its phase, run its agent, answer or land it, read its brief, commits,
+// Task detail dialog: move its phase, run its agent, answer, approve or land it, read its brief, commits,
 // sub-tasks and log.
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Scrollbar, TextareaState, TextView } from "gpui-base";
@@ -126,7 +126,7 @@ export default class Detail {
     const parent = task.parent && this.tasks.find((x) => x.id === task.parent);
     const source = task.forked_from && this.tasks.find((x) => x.id === task.forked_from);
     const subs = this.subs(task, live, t);
-    const ctx = { t, answer: this.answer, busy: this.busy, onAnswer: (text, cx) => this.reply(text, cx), onLand: (cx) => this.act(["land", task.id], cx) };
+    const ctx = { t, answer: this.answer, busy: this.busy, onAnswer: (text, cx) => this.reply(text, cx), onLand: (cx) => this.act(["land", task.id], cx), onApprove: (cx) => this.act(["approve", task.id], cx) };
     const unlanded = Boolean(task.worktree) && !ENDED.includes(task.phase);
     return shell
       .child(v_flex().px(20).pt(18).pb(14).gap(10).border_b(1).border_color(t.border)

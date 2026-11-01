@@ -1,5 +1,6 @@
 // The first prompt an agent gets for a task: the work, and how it keeps its card up to date.
 import { AGENTS } from "./agents";
+import { planFirst } from "./approval";
 import { reportText } from "./report";
 import type { Task } from "./store";
 
@@ -12,6 +13,7 @@ export function protocol(task: Task, parent: Task | null, source: Task | null = 
     source ? followUp(source, forked) : "",
     task.brief ? `\n${task.brief}\n` : "",
     workspace(task),
+    planFirst(task),
     `The person follows your work on a kanban board; keep your card true with the \`board\` CLI (it knows which task is yours):`,
     `- \`board phase plan|work|review|test "<short note>"\` whenever you move to that stage.`,
     `- To hand a part to another agent: \`board sub "<title>" --agent ${Object.keys(AGENTS).join("|")} --brief "<what, where, how to check it>"\`. Its result comes back to you as a message starting with [board]; answer its questions with \`board answer <id> "<text>"\`.`,

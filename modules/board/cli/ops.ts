@@ -2,6 +2,7 @@
 // of it, and every hand-back goes to the task's creator: the parent's agent, or the person (who
 // sees it on the board).
 import { agentSpec } from "./agents";
+import { APPROVED, gate, reviewing } from "./approval";
 import { handBack, protocol } from "./protocol";
 import { isReportStatus, parseReport, REPORTS, reportText } from "./report";
 import { descendants, PHASES, Store, WORK_PHASES, type Phase, type Task } from "./store";
@@ -10,7 +11,7 @@ import { Terminals } from "./terminal";
 import { Git, workdir } from "./worktree";
 import { join, resolve } from "node:path";
 
-export interface NewTask { title: string; brief?: string; cwd?: string; agent?: string; auto_land?: boolean }
+export interface NewTask { title: string; brief?: string; cwd?: string; agent?: string; auto_land?: boolean; plan_first?: boolean }
 export type Fork = Omit<NewTask, "cwd" | "title"> & { title?: string };
 
 /** Phases where the task's work is over: its agent ends, its session stays resumable. */
@@ -69,7 +70,7 @@ export class Board {
   async sub(n: NewTask): Promise<Task> {
     const me = await this.requireSelf("sub");
     // A sub-task's commits land in its parent's worktree, where the parent's agent reviews them.
-    const task = await this.make({ ...n, auto_land: true }, me.id, me.id, resolve(me.cwd, n.cwd ?? "."));
+    const task = await this.make({ ...n, auto_land: true, plan_first: false }, me.id, me.id, resolve(me.cwd, n.cwd ?? "."));
     await this.update(me.id, me.id, `made sub-task ${task.id}: ${task.title}`);
     return task;
   }
@@ -80,7 +81,7 @@ export class Board {
     if (!this.sys.isDir(cwd)) throw new Error(`no such folder: ${cwd}`);
     const task = await this.store.create({
       parent, forked_from, creator, cwd, title: n.title.trim(), brief: n.brief?.trim() ?? "", phase: "backlog", note: "",
-      waiting_on: null, report: null, assignee: null, worktree: null, auto_land: n.auto_land ?? false, commits: [], inbox: [], log: [{ at: this.sys.now(), by: creator, text: "created" }],
+      waiting_on: null, report: null, assignee: null, worktree: null, auto_land: n.auto_land ?? false, approval: n.plan_first ? "pending" : null, commits: [], inbox: [], log: [{ at: this.sys.now(), by: creator, text: "created" }],
     }, this.sys.now());
     return n.agent ? this.assign(task.id, n.agent) : task;
   }
@@ -140,6 +141,7 @@ export class Board {
     const allowed: readonly string[] = me ? WORK_PHASES : PHASES;
     if (!allowed.includes(phase)) throw new Error(`phase must be one of: ${allowed.join(", ")}`);
     const target = id ?? me!.id;
+    if (me) gate(me, phase);
     if (id && phase === "done" && (await this.git.unlanded((await this.store.get(id)).worktree)))
       throw new Error(`${id} has work that has not landed: \`board land ${id}\` once its agent reported done, or move it to failed to drop it`);
     const task = await this.update(target, me?.id ?? "user", `${phase}${note ? `: ${note}` : ""}`, (t) => ({
@@ -154,6 +156,7 @@ export class Board {
   async report(status: string, text: string, more: { detail?: string; options?: string[] } = {}): Promise<Task> {
     if (!isReportStatus(status)) throw new Error(`report must be one of: ${Object.keys(REPORTS).join(", ")}`);
     const me = await this.requireSelf("report");
+    gate(me, status);
     const report = parseReport(status, text, this.sys.now(), more);
     const w = status === "done" ? me.worktree : null;
     const commits = w ? await this.git.ready(w) : me.commits;
@@ -200,6 +203,14 @@ export class Board {
     return this.end(done);
   }
 
+  /** The person approves the plan a plan-first task's agent reported: it starts the work. */
+  async approve(id: string): Promise<Task> {
+    await this.requirePerson("approve");
+    if (!reviewing(await this.store.get(id))) throw new Error(`${id} has no plan to approve: its agent has not reported one`);
+    await this.deliver(id, "user", "approve", APPROVED);
+    return this.update(id, "user", "plan approved", () => ({ approval: "approved", phase: "work", waiting_on: null, report: null }));
+  }
+
   /** The task's worktree when its folder is in git, made on first need and kept on the task. */
   private async checkout(task: Task, all: Task[]): Promise<Task> {
     const w = await this.git.checkout(task, all);
@@ -213,7 +224,8 @@ export class Board {
     const from = (await this.self())?.id ?? "user";
     await this.deliver(id, from, "answer", text);
     return this.update(id, from, `answer: ${text}`, (t) => ({
-      phase: t.phase === "waiting" ? "work" : t.phase,
+      // Changes asked for a plan send its agent back to planning.
+      phase: t.phase !== "waiting" ? t.phase : reviewing(t) ? "plan" : "work",
       waiting_on: null,
       report: t.phase === "waiting" ? null : t.report,
     }));

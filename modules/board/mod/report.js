@@ -9,9 +9,13 @@ const KIND = {
   stuck: { label: (who) => `Stuck · needs ${who}`, icon: "clock", tone: "blocked" },
   done: { label: () => "Done", icon: "circle-check", tone: "done" },
   failed: { label: () => "Failed", icon: "x", tone: "blocked" },
+  plan: { label: () => "Plan · review it", icon: "square-pen", tone: "blocked" },
 };
 /** Done in a worktree, its commits waiting for the person (`board land`). */
 const LAND = { label: () => "Done · land it", icon: "circle-check", tone: "blocked" };
+
+/** A plan-first task's plan, waiting for the person to approve it (`board approve`). */
+const reviewing = (task) => task.phase === "waiting" && task.report?.status === "plan";
 
 export const landing = (task) => task.phase === "waiting" && task.report?.status === "done" && Boolean(task.worktree);
 
@@ -59,16 +63,18 @@ function option(id, text, recommended, onPick, t) {
 
 /** The answer box under a question: one click per option, or own words. */
 export function answerBox(task, ctx) {
-  const { t, answer, busy, onAnswer, onLand } = ctx;
+  const { t, answer, busy, onAnswer, onLand, onApprove } = ctx;
   const options = task.report?.options ?? [];
   const lands = landing(task);
-  const hint = lands ? "Land its commits, or tell its agent what to change" : options.length ? "Pick one, or write your own answer" : "Your answer goes straight to the agent";
+  const plans = reviewing(task);
+  const hint = lands ? "Land its commits, or tell its agent what to change" : plans ? "Approve the plan, or tell its agent what to change" : options.length ? "Pick one, or write your own answer" : "Your answer goes straight to the agent";
   return v_flex().gap(8)
     .when(options.length > 0, (el) => el.child(v_flex().gap(6).children(options.map((o, i) => option(`opt-${i}`, o, i === 0, onAnswer, t)))))
     .child(div().rounded(R.control).border(1).border_color(t.input).bg(t.background).text_size(TEXT.body).child(Textarea.new(answer).p(10)))
     .child(h_flex().gap(8).items_center()
       .child(div().flex_1().text_size(TEXT.meta).text_color(t.dim).child(hint))
-      .child(button("send", busy ? "Sending…" : lands ? "Ask for changes" : "Send answer", (cx) => onAnswer(answer.value(), cx), { kind: lands ? "ghost" : "solid", disabled: busy }))
+      .child(button("send", busy ? "Sending…" : lands || plans ? "Ask for changes" : "Send answer", (cx) => onAnswer(answer.value(), cx), { kind: lands || plans ? "ghost" : "solid", disabled: busy }))
+      .when(plans, (el) => el.child(button("approve", "Approve plan", (cx) => onApprove(cx), { kind: "solid", disabled: busy })))
       .when(lands, (el) => el.child(button("land", `Land ${task.commits.length} commit${task.commits.length === 1 ? "" : "s"}`, (cx) => onLand(cx), { kind: "solid", disabled: busy }))));
 }
 
