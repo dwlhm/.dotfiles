@@ -121,6 +121,7 @@ The user only watches the ORCH board (`Ctrl+Space o`); you (Claude) are the `lea
 - Subject: imperative mood, max 72 characters, no trailing period.
 - Body (when needed): explain the "what" and "why".
 - Never commit or push code repositories without explicit confirmation (auto-committing verified updates inside `~/brain` is permitted and expected).
+- Exception: as the agent of a `board` task running in its own worktree, commit on its `board/<task>` branch as the board protocol in your first prompt says; whether those commits reach the person's branch is decided by the board (auto-land or the person's Land), never push.
 
 ## Security
 

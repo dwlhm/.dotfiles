@@ -3,12 +3,12 @@
 let
   src = lib.fileset.toSource {
     root = ./cli;
-    fileset = lib.fileset.fileFilter (f: f.hasExt "ts" && !lib.hasSuffix ".test.ts" f.name) ./cli;
+    fileset = lib.fileset.fileFilter (f: f.hasExt "ts" && !lib.hasSuffix ".test.ts" f.name && f.name != "fake.ts") ./cli;
   };
 
   board = pkgs.writeShellApplication {
     name = "board";
-    runtimeInputs = [ pkgs.bun ];
+    runtimeInputs = [ pkgs.bun pkgs.git ];
     text = ''exec bun ${src}/cli.ts "$@"'';
     # Bundling resolves every static import: a module missing from the package fails the build.
     checkPhase = ''

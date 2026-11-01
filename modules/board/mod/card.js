@@ -44,12 +44,15 @@ export function card(task, ctx) {
   const done = subs.filter((s) => s.phase === "done").length;
   const agent = task.assignee?.agent;
   const shown = subs.slice(0, MAX_SUBS);
+  // An ended task's worktree is gone: there is no agent to resume.
+  const resumable = Boolean(agent) && !(task.worktree && ["done", "failed"].includes(task.phase));
 
   return surface(v_flex().id(`card-${task.id}`).w_full().p(GAP.card).gap(8).rounded(R.card), t)
     .hover((s) => s.border_color(t.input))
     .on_click((_e, cx) => onSelect(task.id, cx))
     .child(h_flex().gap(6).items_center().text_size(TEXT.meta)
       .child(div().text_color(t.dim).font_medium().child(task.id))
+      .when(Boolean(task.forked_from), (el) => el.child(div().text_color(t.dim).child(`↳ ${task.forked_from}`)))
       .child(div().flex_1())
       .when(Boolean(waitingChip(task, t)), (el) => el.child(waitingChip(task, t)))
       .when(Boolean(agent), (el) => el.child(liveMark(l, t))))
@@ -67,5 +70,5 @@ export function card(task, ctx) {
       .child(tag(folders[task.cwd], t, { icon: "folder", tip: tilde(task.cwd) }))
       .child(div().flex_1())
       .when(subs.length > 0, (el) => el.child(progress(`p-${task.id}`, done, subs.length, t)))
-      .when(Boolean(agent), (el) => el.child(iconButton(`open-${task.id}`, "terminal", l ? "Show agent" : "Resume agent", (cx) => onOpen(task.id, cx)))));
+      .when(resumable, (el) => el.child(iconButton(`open-${task.id}`, "terminal", l ? "Show agent" : "Resume agent", (cx) => onOpen(task.id, cx)))));
 }

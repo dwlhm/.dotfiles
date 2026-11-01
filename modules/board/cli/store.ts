@@ -3,6 +3,7 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseReport, type Report } from "./report";
+import type { Commit, Worktree } from "./worktree";
 
 export const PHASES = ["backlog", "plan", "work", "review", "test", "waiting", "done", "failed"] as const;
 export type Phase = (typeof PHASES)[number];
@@ -23,6 +24,8 @@ export interface Entry { at: number; by: string; text: string }
 export interface Task {
   id: string;
   parent: string | null;
+  /** The task this one follows up on: its agent starts from a fork of that task's session. */
+  forked_from: string | null;
   title: string;
   brief: string;
   cwd: string;
@@ -36,6 +39,12 @@ export interface Task {
   /** The agent's last report while it stands: cleared by an answer or a phase change. */
   report: Report | null;
   assignee: Assignee | null;
+  /** The task's own git checkout (`worktree.ts`), or null when its folder is not in git. */
+  worktree: Worktree | null;
+  /** Its agent puts its commits on the target's branch itself; otherwise the person lands them. */
+  auto_land: boolean;
+  /** The commits it landed: the record of what it changed. */
+  commits: Commit[];
   /** Hand-backs that arrived while this task's agent was not running. */
   inbox: Message[];
   log: Entry[];
@@ -133,11 +142,11 @@ export class Store {
 
 const LEGACY = { waiting: "question", done: "done", failed: "failed" } as const;
 
-/** A task saved before reports had a shape: its closing note becomes the report. */
+/** Fills fields a task saved by an older board lacks: a closing note becomes the report. */
 function upgrade(t: Task): Task {
-  if (t.report !== undefined) return t;
   const status = LEGACY[t.phase as keyof typeof LEGACY];
-  return { ...t, report: status && t.note.trim() ? parseReport(status, t.note, t.updated) : null };
+  const report = t.report !== undefined ? t.report : status && t.note.trim() ? parseReport(status, t.note, t.updated) : null;
+  return { ...t, report, forked_from: t.forked_from ?? null, worktree: t.worktree ?? null, auto_land: t.auto_land ?? false, commits: t.commits ?? [] };
 }
 
 /** T2 < T2.1 < T2.10 < T10: numeric per segment. */

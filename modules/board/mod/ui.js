@@ -1,7 +1,7 @@
 // The board's design system: tokens and the small pieces every view shares. Colors come from
 // the Herdr theme only; icons are the app's own (workspace-chrome) so strokes match its chrome.
 import { div, svg, image } from "gpui-kit";
-import { h_flex, Avatar, AvatarFallback, Button, Progress, ProgressTrack, ProgressIndicator } from "gpui-base";
+import { h_flex, Avatar, AvatarFallback, Button, Checkbox, Progress, ProgressTrack, ProgressIndicator } from "gpui-base";
 import { home, settings, theme } from "herdr";
 
 // Concentric radii: a card sits 6px inside its column, so card = column - 6.
@@ -69,6 +69,17 @@ export function segment(id, on, onClick, t) {
     .when(on, (el) => el.bg(t.background).shadow_xs())
     .when(!on, (el) => el.hover((s) => s.text_color(t.foreground)))
     .on_click((_e, cx) => onClick(cx));
+}
+
+/** A labelled checkbox (gpui-base draws none: the box and its check are ours). */
+export function checkbox(id, label, on, onChange) {
+  const t = theme();
+  return Checkbox.new(id).flex().gap(8).items_center().self_start().text_size(TEXT.body).text_color(t.foreground)
+    .checked(on).on_change((checked, cx) => onChange(checked, cx))
+    .child(div().size(16).flex_none().flex().items_center().justify_center().rounded(R.chip - 1).border(1)
+      .border_color(on ? t.solid : t.input).bg(on ? t.solid : t.background)
+      .when(on, (el) => el.text_color(t.solid_foreground).child(icon("check", 11))))
+    .child(label);
 }
 
 /** A text button; `kind`: "solid" (primary), "ghost" or "danger". Hit area ≥ 28px. */

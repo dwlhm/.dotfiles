@@ -1,6 +1,6 @@
 // The board's data: tasks from the `board` CLI (the only writer), live agent state from Herdr's
 // own terminal list (labels `board.task`), so the view never parses the store itself.
-import { exec, home, knownAgents, run, spaces, terminals } from "herdr";
+import { exec, home, knownAgents, openOverlay, run, spaces, terminals } from "herdr";
 
 export const STATE = `${home()}/.local/state/board/tasks`;
 
@@ -9,6 +9,11 @@ export async function board(args) {
   const r = await exec("board", args).catch((e) => ({ code: 127, stdout: "", stderr: String(e) }));
   if (r.code !== 0) throw new Error(r.stderr.trim().replace(/^board: /, "") || `board exited ${r.code}`);
   return r.stdout.trim();
+}
+
+/** The new task dialog; with `from`, a follow-up of that task (`board fork`). */
+export function openCompose(programs, from = null) {
+  openOverlay({ mod: "board", props: { role: "compose", programs, from }, kind: "dialog", width: 540, height: 540 });
 }
 
 export const loadTasks = async () => JSON.parse(await board(["ls", "--json"]));

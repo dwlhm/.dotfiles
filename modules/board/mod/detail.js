@@ -1,11 +1,15 @@
-// Task detail dialog: move its phase, run its agent, answer it, read its brief, sub-tasks and log.
+// Task detail dialog: move its phase, run its agent, answer or land it, read its brief, commits,
+// sub-tasks and log.
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Scrollbar, TextareaState, TextView } from "gpui-base";
 import { closeOverlay, props, theme, watchFolder } from "herdr";
-import { board, focusTask, liveByTask, loadTasks, STATE } from "./data.js";
+import { board, focusTask, liveByTask, loadTasks, openCompose, STATE } from "./data.js";
+import { commitList, showCommit } from "./changes.js";
 import { answerBox, reportPanel } from "./report.js";
 import { agentMark, button, chip, iconButton, liveMark, PHASE, R, TEXT, tone } from "./ui.js";
 
+/** Phases where the task's work is over: its agent has ended and it can be followed up. */
+const ENDED = ["done", "failed"];
 const when = (ms) => new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 export default class Detail {
@@ -16,6 +20,7 @@ export default class Detail {
     this.error = "";
     this.confirmDelete = false;
     this.busy = false;
+    this.commit = { shown: null, stat: "" };
     this.answer = TextareaState.new({ placeholder: "Write your answer…", rows: 3 });
     this.answer.on("submit", (_e, cx) => this.reply(this.answer.value(), cx));
     this.reload(cx);
@@ -53,6 +58,7 @@ export default class Detail {
   go(id, cx) {
     this.id = id;
     this.confirmDelete = false;
+    this.commit = { shown: null, stat: "" };
     this.answer.set_value("");
     cx.notify();
   }
@@ -77,6 +83,8 @@ export default class Detail {
   agentRow(task, live, t) {
     const a = task.assignee;
     const assign = (name) => button(`as-${name}`, name, (cx) => this.act(["assign", task.id, name], cx));
+    // Its worktree went when it ended: nothing to resume into; a follow-up continues it.
+    const gone = Boolean(task.worktree) && ENDED.includes(task.phase);
     if (!a) {
       return h_flex().gap(6).items_center().child(div().text_size(TEXT.body).text_color(t.muted).mr(4).child("Start an agent:")).children(Object.keys(this.programs).map(assign));
     }
@@ -85,8 +93,8 @@ export default class Detail {
       .child(v_flex().flex_1().min_w(0)
         .child(h_flex().gap(6).items_center().text_size(TEXT.body).text_color(t.foreground).child(a.agent).child(liveMark(live, t)))
         .child(div().text_size(TEXT.meta).text_color(t.dim).truncate()
-          .child(live ? (live.msg || `running in ${live.address}`) : "not running · resumes with its context")))
-      .child(button("open", live ? "Show" : "Resume", (cx) => this.act(["open", task.id], cx, (address, cx) => { closeOverlay(props().overlay); focusTask(task.id, address, cx); }), { kind: "solid", icon: "terminal" }))
+          .child(live ? (live.msg || `running in ${live.address}`) : gone ? "ended · its worktree is gone, follow it up to continue" : "not running · resumes with its context")))
+      .when(!gone, (el) => el.child(button("open", live ? "Show" : "Resume", (cx) => this.act(["open", task.id], cx, (address, cx) => { closeOverlay(props().overlay); focusTask(task.id, address, cx); }), { kind: "solid", icon: "terminal" })))
       .when(Boolean(live), (el) => el.child(button("stop", "Stop", (cx) => this.act(["stop", task.id], cx))));
   }
 
@@ -116,13 +124,16 @@ export default class Detail {
     if (!task) return shell.p(20).child(div().text_color(t.muted).child(this.error || "Loading…"));
     const live = liveByTask();
     const parent = task.parent && this.tasks.find((x) => x.id === task.parent);
+    const source = task.forked_from && this.tasks.find((x) => x.id === task.forked_from);
     const subs = this.subs(task, live, t);
-    const ctx = { t, answer: this.answer, busy: this.busy, onAnswer: (text, cx) => this.reply(text, cx) };
+    const ctx = { t, answer: this.answer, busy: this.busy, onAnswer: (text, cx) => this.reply(text, cx), onLand: (cx) => this.act(["land", task.id], cx) };
+    const unlanded = Boolean(task.worktree) && !ENDED.includes(task.phase);
     return shell
       .child(v_flex().px(20).pt(18).pb(14).gap(10).border_b(1).border_color(t.border)
         .child(h_flex().gap(8).items_center().text_size(TEXT.meta)
           .when(Boolean(parent), (el) => el.child(div().id("up").text_color(t.accent).hover((s) => s.opacity(0.8)).on_click((_e, cx) => this.go(parent.id, cx)).child(`${parent.id} ›`)))
           .child(div().text_color(t.dim).font_medium().child(task.id))
+          .when(Boolean(source), (el) => el.child(div().id("source").text_color(t.accent).hover((s) => s.opacity(0.8)).on_click((_e, cx) => this.go(source.id, cx)).child(`↳ ${source.id}`)))
           .child(chip(PHASE[task.phase].label, tone(t, task.phase)))
           .child(div().flex_1())
           .child(iconButton("close", "x", "Close", () => closeOverlay(props().overlay))))
@@ -137,13 +148,16 @@ export default class Detail {
           .when(task.inbox.length > 0, (el) => el.child(this.section(`Waiting for its agent (${task.inbox.length})`, v_flex().gap(4)
             .children(task.inbox.map((m, i) => div().id(`in-${i}`).text_size(TEXT.body).child(`${m.from} ${m.status}: ${m.text}`))))))
           .when(Boolean(task.brief), (el) => el.child(this.section("Brief", TextView.markdown(`brief-${task.id}`, task.brief).selectable(true).text_size(TEXT.body))))
+          .when(task.commits.length > 0, (el) => el.child(this.section(ENDED.includes(task.phase) ? "Commits" : "Commits to land",
+            commitList(task, this.commit, t, (sha, cx) => showCommit(task, sha, this.commit, cx)))))
           .when(Boolean(subs), (el) => el.child(this.section("Sub-tasks", subs)))
           .child(this.section("Activity", this.log(task, t)))
           .child(h_flex().gap(8).items_center().pt(4)
             .child(div().flex_1().text_size(TEXT.meta).text_color(t.blocked).child(this.error))
-            .child(button("del", this.confirmDelete ? "Delete with its sub-tasks?" : "Delete", (cx) => {
+            .when(ENDED.includes(task.phase), (el) => el.child(button("fork", "Follow up", () => { closeOverlay(props().overlay); openCompose(this.programs, task); }, { icon: "plus" })))
+            .child(button("del", this.confirmDelete ? (unlanded ? "Delete, dropping work not landed?" : "Delete with its sub-tasks?") : "Delete", (cx) => {
               if (!this.confirmDelete) { this.confirmDelete = true; return cx.notify(); }
-              this.act(["rm", task.id], cx, () => closeOverlay(props().overlay));
+              this.act(["rm", task.id, "--force"], cx, () => closeOverlay(props().overlay));
             }, { kind: "danger" }))))
         .child(Scrollbar.vertical("detail-body").absolute().inset_0()));
   }

@@ -10,13 +10,19 @@ import { realSys, type Sys } from "./sys";
 const NAMES = Object.keys(AGENTS).join("|");
 const USAGE = `board — kanban tasks for you and your agents
 
-  board add "<title>" [--brief <text>] [--cwd <dir>] [--agent ${NAMES}]
+  board add "<title>" [--brief <text>] [--cwd <dir>] [--agent ${NAMES}] [--auto-land]
+                                   in git the agent works in its own worktree; --auto-land lets
+                                   it put its commits on your branch, else you land them
   board assign <id> <agent>        start an agent session on the task
   board open <id>                  resume the task's agent if it ended (prints its terminal)
   board stop <id>                  end the task's agent (its session stays resumable)
-  board phase [<id>] <phase> ["<note>"]
-  board answer <id> "<text>"       answer a waiting task
-  board ls [--json] · board show <id> [--json] · board rm <id>
+  board fork <id> ["<title>"] [--brief <text>] [--agent ${NAMES}] [--auto-land]
+                                   a new task that follows up on <id>: same folder, its agent
+                                   (default: <id>'s) starts from a fork of <id>'s session
+  board phase [<id>] <phase> ["<note>"]   done or failed ends the task's agent
+  board answer <id> "<text>"       answer a waiting task (after done: ask its agent for changes)
+  board land <id>                  put a done task's commits on your branch (fast-forward)
+  board ls [--json] · board show <id> [--json] · board rm <id> [--force]
   board agents                     the agents the board can start, one per line
   board ui                         open the board as a Herdr tab
 
@@ -32,6 +38,9 @@ const line = (t: Task) =>
 function show(t: Task): string {
   const head = [`${t.id} [${t.phase}] ${t.title}`, `folder ${t.cwd} · creator ${t.creator}`];
   if (t.assignee) head.push(`agent ${t.assignee.agent} · terminal ${t.assignee.terminal ?? "ended"} · session ${t.assignee.session ?? "-"}`);
+  if (t.forked_from) head.push(`follows up on ${t.forked_from}`);
+  if (t.worktree) head.push(`worktree ${t.worktree.path} · ${t.worktree.branch} → ${t.worktree.target}${t.auto_land ? " (auto-land)" : ""}`);
+  if (t.commits.length) head.push("commits:", ...t.commits.map((c) => `  ${c.sha.slice(0, 9)} ${c.subject}`));
   if (t.waiting_on) head.push(`waiting on ${t.waiting_on}`);
   if (t.report) head.push("", `${t.report.status}: ${reportText(t.report)}`);
   if (t.brief) head.push("", t.brief);
@@ -56,14 +65,15 @@ function joinValues(argv: string[]): string[] {
 export async function main(argv: string[], sys: Sys = realSys): Promise<string> {
   const { values: o, positionals: [cmd, ...a] } = parseArgs({
     args: joinValues(argv), allowPositionals: true, strict: true,
-    options: { brief: { type: "string" }, cwd: { type: "string" }, agent: { type: "string" }, detail: { type: "string" }, option: { type: "string", multiple: true }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { brief: { type: "string" }, cwd: { type: "string" }, agent: { type: "string" }, detail: { type: "string" }, option: { type: "string", multiple: true }, json: { type: "boolean" }, "auto-land": { type: "boolean" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   const b = new Board(sys);
   const need = (n: number, usage: string) => { if (a.length < n) throw new Error(`usage: board ${usage}`); };
   const task = (t: Task) => (o.json ? JSON.stringify(t) : line(t));
   switch (o.help ? "help" : cmd) {
-    case "add": need(1, `add "<title>"`); return task(await b.add({ title: a.join(" "), brief: o.brief, cwd: o.cwd, agent: o.agent }));
+    case "add": need(1, `add "<title>"`); return task(await b.add({ title: a.join(" "), brief: o.brief, cwd: o.cwd, agent: o.agent, auto_land: o["auto-land"] }));
     case "sub": need(1, `sub "<title>"`); return task(await b.sub({ title: a.join(" "), brief: o.brief, cwd: o.cwd, agent: o.agent }));
+    case "fork": need(1, "fork <id>"); return task(await b.fork(a[0], { title: a.slice(1).join(" "), brief: o.brief, agent: o.agent, auto_land: o["auto-land"] }));
     case "assign": need(2, "assign <id> <agent>"); return task(await b.assign(a[0], a[1]));
     case "open": need(1, "open <id>"); return (await b.open(a[0])).assignee!.terminal!;
     case "stop": need(1, "stop <id>"); return task(await b.stop(a[0]));
@@ -75,7 +85,8 @@ export async function main(argv: string[], sys: Sys = realSys): Promise<string> 
     }
     case "report": need(2, "report <status> <headline>"); return task(await b.report(a[0], a.slice(1).join(" "), { detail: o.detail, options: o.option }));
     case "answer": need(2, "answer <id> <text>"); return task(await b.answer(a[0], a.slice(1).join(" ")));
-    case "rm": need(1, "rm <id>"); return `removed ${(await b.remove(a[0])).join(", ")}`;
+    case "land": need(1, "land <id>"); return task(await b.land(a[0]));
+    case "rm": need(1, "rm <id>"); return `removed ${(await b.remove(a[0], o.force)).join(", ")}`;
     case "me": {
       const me = await b.self();
       if (!me) throw new Error("this terminal works no board task");

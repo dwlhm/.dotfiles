@@ -10,6 +10,10 @@ const KIND = {
   done: { label: () => "Done", icon: "circle-check", tone: "done" },
   failed: { label: () => "Failed", icon: "x", tone: "blocked" },
 };
+/** Done in a worktree, its commits waiting for the person (`board land`). */
+const LAND = { label: () => "Done · land it", icon: "circle-check", tone: "blocked" };
+
+export const landing = (task) => task.phase === "waiting" && task.report?.status === "done" && Boolean(task.worktree);
 
 const ago = (ms) => {
   const m = Math.round((Date.now() - ms) / 60000);
@@ -20,7 +24,7 @@ const ago = (ms) => {
 };
 
 const kindOf = (task, t) => {
-  const k = KIND[task.report.status];
+  const k = landing(task) ? LAND : KIND[task.report.status];
   return { ...k, color: t[k.tone] ?? t.dim, label: k.label(task.waiting_on === "user" || !task.waiting_on ? "you" : task.waiting_on) };
 };
 
@@ -55,14 +59,17 @@ function option(id, text, recommended, onPick, t) {
 
 /** The answer box under a question: one click per option, or own words. */
 export function answerBox(task, ctx) {
-  const { t, answer, busy, onAnswer } = ctx;
+  const { t, answer, busy, onAnswer, onLand } = ctx;
   const options = task.report?.options ?? [];
+  const lands = landing(task);
+  const hint = lands ? "Land its commits, or tell its agent what to change" : options.length ? "Pick one, or write your own answer" : "Your answer goes straight to the agent";
   return v_flex().gap(8)
     .when(options.length > 0, (el) => el.child(v_flex().gap(6).children(options.map((o, i) => option(`opt-${i}`, o, i === 0, onAnswer, t)))))
     .child(div().rounded(R.control).border(1).border_color(t.input).bg(t.background).text_size(TEXT.body).child(Textarea.new(answer).p(10)))
     .child(h_flex().gap(8).items_center()
-      .child(div().flex_1().text_size(TEXT.meta).text_color(t.dim).child(options.length ? "Pick one, or write your own answer" : "Your answer goes straight to the agent"))
-      .child(button("send", busy ? "Sending…" : "Send answer", (cx) => onAnswer(answer.value(), cx), { kind: "solid", disabled: busy })));
+      .child(div().flex_1().text_size(TEXT.meta).text_color(t.dim).child(hint))
+      .child(button("send", busy ? "Sending…" : lands ? "Ask for changes" : "Send answer", (cx) => onAnswer(answer.value(), cx), { kind: lands ? "ghost" : "solid", disabled: busy }))
+      .when(lands, (el) => el.child(button("land", `Land ${task.commits.length} commit${task.commits.length === 1 ? "" : "s"}`, (cx) => onLand(cx), { kind: "solid", disabled: busy }))));
 }
 
 /** At the top of the task dialog: the whole report, and the answer box while it waits. */

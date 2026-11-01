@@ -2,7 +2,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Scrollbar } from "gpui-base";
 import { notify, openOverlay, playSound, theme, watchFolder } from "herdr";
-import { agentPrograms, board, focusTask, liveByTask, loadTasks, nameTabs, STATE } from "./data.js";
+import { agentPrograms, board, focusTask, liveByTask, loadTasks, nameTabs, openCompose, STATE } from "./data.js";
 import { card } from "./card.js";
 import { button, columnOf, COLUMNS, folderLabels, GAP, icon, PHASE, R, segment, TEXT, tilde, tone } from "./ui.js";
 
@@ -61,7 +61,7 @@ export default class Board {
   }
 
   compose() {
-    openOverlay({ mod: "board", props: { role: "compose", programs: this.programs }, kind: "dialog", width: 540, height: 540 });
+    openCompose(this.programs);
   }
 
   open(id, cx) {

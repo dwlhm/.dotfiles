@@ -1,5 +1,6 @@
 // Everything the board touches outside its store: programs, environment, time, ids. Injected so
 // tests never start a real hc terminal or agent.
+import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,8 @@ export interface Result { code: number; out: string; err: string }
 
 export interface Sys {
   run(argv: string[]): Promise<Result>;
+  /** Starts `argv` in its own session and does not wait: it outlives the board command. */
+  detach(argv: string[], env: Record<string, string | undefined>): void;
   env: Record<string, string | undefined>;
   cwd(): string;
   now(): number;
@@ -21,6 +24,9 @@ export const realSys: Sys = {
     const p = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
     const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
     return { code, out, err };
+  },
+  detach(argv, env) {
+    spawn(argv[0], argv.slice(1), { env, detached: true, stdio: "ignore" }).unref();
   },
   env: process.env,
   cwd: () => process.cwd(),

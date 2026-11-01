@@ -5,6 +5,8 @@ import type { Task } from "./store";
 import type { Sys } from "./sys";
 
 export const SPACE = "board";
+/** Seconds an agent may keep working after its final report before its terminal ends anyway. */
+const TURN_GRACE = 600;
 export const terminalName = (id: string) => `board-${id.toLowerCase().replaceAll(".", "-")}`;
 
 export class Terminals {
@@ -27,14 +29,14 @@ export class Terminals {
     }
   }
 
-  /** Starts `argv` for the task and returns the terminal address. A finished terminal left
+  /** Starts `argv` for the task in `cwd` (its folder, or its worktree) and returns the terminal address. A finished terminal left
    *  from an earlier run of the task is removed first, since names are unique. */
-  async spawn(task: Task, argv: string[]): Promise<string> {
+  async spawn(task: Task, argv: string[], cwd: string): Promise<string> {
     const name = terminalName(task.id);
     await this.sys.run(["hc", "rm", name]);
     const program = this.sys.which(argv[0]) ?? argv[0];
     const out = await this.hc([
-      "run", "--bg", "--json", "--no-parent", "--no-notify", "--name", name, "--cwd", task.cwd,
+      "run", "--bg", "--json", "--no-parent", "--no-notify", "--name", name, "--cwd", cwd,
       "--label", `board.task=${task.id}`, "--label", `herdr.space=${SPACE}`, "--label", `herdr.tab=${name}`,
       "--", program, ...argv.slice(1),
     ]);
@@ -51,5 +53,14 @@ export class Terminals {
     if (!address) return;
     await this.sys.run(["hc", "kill", address]);
     await this.sys.run(["hc", "rm", address]);
+  }
+
+  /** Ends the terminal once its agent's current turn ends: the agent asking is still inside the
+   *  `board` call that finishes its work. Runs apart from the caller, without its terminal id, so
+   *  hc does not take the wait as the agent waiting on itself. */
+  killAfterTurn(address: string) {
+    const hc = this.sys.which("hc") ?? "hc";
+    const { HC_TERMINAL_ID: _, ...env } = this.sys.env;
+    this.sys.detach(["sh", "-c", `"$0" wait "$1" --timeout ${TURN_GRACE}; "$0" kill "$1"; "$0" rm "$1"`, hc, address], env);
   }
 }

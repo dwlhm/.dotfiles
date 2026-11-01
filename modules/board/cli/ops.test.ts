@@ -3,36 +3,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "./cli";
+import { fakeSys, U } from "./fake";
 import { Board } from "./ops";
-import type { Sys } from "./sys";
-
-const U = (i: number) => `${String(i).padStart(8, "0")}-0000-4000-8000-000000000000`;
-
-// A fake herdr-core: terminals live in a set, every hc call is recorded. No real process starts.
-function fakeSys(state: string) {
-  const live = new Set<string>();
-  const calls: string[][] = [];
-  let n = 0, clock = 1000, ids = 0;
-  const sys: Sys & { live: Set<string>; calls: string[][]; as(t: string | undefined): void } = {
-    live, calls,
-    env: { BOARD_STATE: state },
-    cwd: () => "/repo",
-    now: () => clock++,
-    uuid: () => U(++ids),
-    which: (c) => `/bin/${c}`,
-    isDir: (p) => !p.startsWith("/missing"),
-    as(t) { this.env = { ...this.env, HC_TERMINAL_ID: t }; },
-    async run(argv) {
-      calls.push(argv);
-      const [, cmd, arg] = argv;
-      if (cmd === "run") { const a = `t${++n}`; live.add(a); return { code: 0, out: JSON.stringify({ address: a }), err: "" }; }
-      if (cmd === "get") return live.has(arg) ? { code: 0, out: JSON.stringify({ state: "live" }), err: "" } : { code: 1, out: "", err: "no terminal" };
-      if (cmd === "kill") live.delete(arg);
-      return { code: 0, out: "", err: "" };
-    },
-  };
-  return sys;
-}
 
 let sys: ReturnType<typeof fakeSys>;
 let b: Board;
@@ -74,6 +46,34 @@ test("a sub-task's report goes to its creator's live agent", async () => {
   const t = await b.report("done", "toggle added");
   expect(t.phase).toBe("done");
   expect(sent()).toEqual([["t1", "[board] T1.1 done: toggle added"]]);
+});
+
+test("done or failed ends the agent: the reporter after its turn, a card moved by the person at once", async () => {
+  await b.add({ title: "root", agent: "claude" });
+  sys.as("t1");
+  await b.sub({ title: "ui", agent: "claude" });
+  sys.as("t2");
+  const t = await b.report("done", "toggle added");
+  expect(t.assignee).toEqual({ agent: "claude", terminal: null, session: U(2) });
+  expect(t.log.at(-1)!.text).toBe("done: agent ended");
+  // The reporter is inside `board report`: hc ends it once its turn ends, from its own session.
+  expect(sys.detached).toHaveLength(1);
+  const { argv, env } = sys.detached[0];
+  expect(argv.slice(0, 2)).toEqual(["sh", "-c"]);
+  expect(argv.slice(3)).toEqual(["/bin/hc", "t2"]);
+  expect(env.HC_TERMINAL_ID).toBeUndefined();
+  expect(sys.calls.some((c) => c[1] === "kill")).toBe(false);
+
+  sys.as(undefined);
+  await b.phase("failed", "", "T1");
+  expect(sys.live.has("t1")).toBe(false);
+  expect((await b.store.get("T1")).assignee!.terminal).toBeNull();
+  // An ended card's agent can still be resumed to look at it; moving it again ends nothing twice.
+  expect((await b.open("T1")).assignee!.terminal).toBe("t3");
+  await b.stop("T1");
+  const kills = sys.calls.filter((c) => c[1] === "kill").length;
+  await b.phase("done", "", "T1");
+  expect(sys.calls.filter((c) => c[1] === "kill").length).toBe(kills);
 });
 
 test("a hand-back to an ended agent waits in its inbox and comes with the resume", async () => {
