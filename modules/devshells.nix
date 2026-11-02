@@ -10,12 +10,13 @@ let
       '';
     };
 
-  nodejs_16 = pkgs.stdenvNoCC.mkDerivation {
+  # Prebuilt upstream binaries for Node lines nixpkgs has dropped (EOL).
+  mkNodeBin = version: sha256: pkgs.stdenvNoCC.mkDerivation {
     pname = "nodejs";
-    version = "16.20.2";
+    inherit version;
     src = pkgs.fetchurl {
-      url = "https://nodejs.org/dist/v16.20.2/node-v16.20.2-darwin-arm64.tar.gz";
-      sha256 = "6a5c4108475871362d742b988566f3fe307f6a67ce14634eb3fbceb4f9eea88c";
+      url = "https://nodejs.org/dist/v${version}/node-v${version}-darwin-arm64.tar.gz";
+      inherit sha256;
     };
     dontConfigure = true;
     dontBuild = true;
@@ -24,6 +25,9 @@ let
       cp -R bin include lib share $out/
     '';
   };
+
+  nodejs_16 = mkNodeBin "16.20.2" "6a5c4108475871362d742b988566f3fe307f6a67ce14634eb3fbceb4f9eea88c";
+  nodejs_20 = mkNodeBin "20.20.2" "466e05f3477c20dfb723054dfebffe55bc74660ee77f612166fca121dacb65b6";
 
   webShell = mkLeanShell "web" [
     pkgs.nodejs
@@ -38,8 +42,8 @@ in {
   ] "";
 
   node20 = mkLeanShell "node20" [
-    pkgs.nodejs_20
-    (pkgs.pnpm.override { nodejs = pkgs.nodejs_20; })
+    nodejs_20
+    (pkgs.pnpm_10.override { nodejs = nodejs_20; })
   ] "";
 
   node16 = mkLeanShell "node16" [
